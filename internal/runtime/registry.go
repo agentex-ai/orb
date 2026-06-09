@@ -23,7 +23,10 @@ func NewRegistry(adapters ...Adapter) *Registry {
 }
 
 func DefaultRegistry() *Registry {
-	return NewRegistry(NewEchoAdapter())
+	return NewRegistry(
+		NewEchoAdapter(),
+		NewPrivateEchoAdapter(),
+	)
 }
 
 func (r *Registry) Models(ctx context.Context) []Model {

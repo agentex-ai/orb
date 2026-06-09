@@ -225,3 +225,7 @@ freeze a final public contract yet.
 The current repository implementation serves an early subset of this API with a
 model-routed adapter registry and a bundled local `echo` adapter for the model
 `orb/example-text`.
+
+The default runtime also exposes a bundled private-style model,
+`orb/private-example-text`, so the current skeleton already exercises model
+routing across more than one deployment type.

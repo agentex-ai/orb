@@ -28,12 +28,16 @@ func TestModels(t *testing.T) {
 		t.Fatalf("expected list object, got %q", response.Object)
 	}
 
-	if len(response.Data) != 1 || response.Data[0].ID != "orb/example-text" {
+	if len(response.Data) != 2 || response.Data[0].ID != "orb/example-text" {
 		t.Fatalf("unexpected model list: %#v", response.Data)
 	}
 
 	if response.Data[0].Provider != "echo" {
 		t.Fatalf("expected echo provider, got %#v", response.Data[0])
+	}
+
+	if response.Data[1].ID != "orb/private-example-text" || response.Data[1].Provider != "private-echo" || response.Data[1].Deployment != "private" {
+		t.Fatalf("expected private echo model, got %#v", response.Data[1])
 	}
 }
 
@@ -102,5 +106,33 @@ func TestResponsesUnknownModel(t *testing.T) {
 
 	if !strings.Contains(recorder.Body.String(), `"not_found"`) {
 		t.Fatalf("expected not found error, got %s", recorder.Body.String())
+	}
+}
+
+func TestResponsesReturnsPrivateEchoPayload(t *testing.T) {
+	body := []byte(`{
+		"model":"orb/private-example-text",
+		"input":[{"role":"user","content":[{"type":"input_text","text":"hello private orb"}]}]
+	}`)
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	recorder := httptest.NewRecorder()
+
+	NewServer().ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", recorder.Code)
+	}
+
+	var response ResponseEnvelope
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("expected valid JSON response: %v", err)
+	}
+
+	if response.Runtime.Adapter != "private-echo" || response.Runtime.Deployment != "private" {
+		t.Fatalf("unexpected private runtime metadata: %#v", response.Runtime)
+	}
+
+	if len(response.Output) != 1 || response.Output[0].Text != "Private Echo: hello private orb" {
+		t.Fatalf("unexpected private output payload: %#v", response.Output)
 	}
 }

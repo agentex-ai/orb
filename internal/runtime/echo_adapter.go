@@ -5,6 +5,7 @@ import (
 )
 
 const echoModelID = "orb/example-text"
+const privateEchoModelID = "orb/private-example-text"
 
 type EchoAdapter struct {
 	name       string
@@ -21,6 +22,17 @@ func NewEchoAdapter() *EchoAdapter {
 		Capabilities: []string{"text"},
 		Status:       "ready",
 	}, "Echo: ")
+}
+
+func NewPrivateEchoAdapter() *EchoAdapter {
+	return NewStaticEchoAdapter("private-echo", Model{
+		ID:           privateEchoModelID,
+		Object:       "model",
+		Provider:     "private-echo",
+		Deployment:   "private",
+		Capabilities: []string{"text"},
+		Status:       "ready",
+	}, "Private Echo: ")
 }
 
 func NewStaticEchoAdapter(name string, model Model, textPrefix string) *EchoAdapter {

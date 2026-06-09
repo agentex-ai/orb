@@ -57,8 +57,10 @@ Current placeholder endpoints:
 - `POST /v1/responses`
 
 The current runtime uses a model-routed adapter registry. The default registry
-currently exposes a bundled local `echo` adapter with the model
-`orb/example-text`.
+currently exposes:
+
+- a bundled local `echo` adapter with the model `orb/example-text`
+- a bundled private-style `echo` adapter with the model `orb/private-example-text`
 
 ## Architecture Direction
 

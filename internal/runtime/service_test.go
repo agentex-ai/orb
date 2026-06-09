@@ -9,12 +9,16 @@ func TestServiceModels(t *testing.T) {
 	service := NewService(DefaultRegistry())
 
 	models := service.Models(context.Background())
-	if len(models) != 1 {
-		t.Fatalf("expected 1 model, got %d", len(models))
+	if len(models) != 2 {
+		t.Fatalf("expected 2 models, got %d", len(models))
 	}
 
 	if models[0].ID != echoModelID || models[0].Provider != "echo" {
 		t.Fatalf("unexpected model payload: %#v", models[0])
+	}
+
+	if models[1].ID != privateEchoModelID || models[1].Provider != "private-echo" {
+		t.Fatalf("unexpected second model payload: %#v", models[1])
 	}
 }
 
@@ -78,19 +82,12 @@ func TestServiceCreateResponseUnknownModel(t *testing.T) {
 func TestServiceRoutesToRegisteredAdapterByModel(t *testing.T) {
 	registry := NewRegistry(
 		NewEchoAdapter(),
-		NewStaticEchoAdapter("private-echo", Model{
-			ID:           "orb/private-example-text",
-			Object:       "model",
-			Provider:     "private-echo",
-			Deployment:   "private",
-			Capabilities: []string{"text"},
-			Status:       "ready",
-		}, "Private Echo: "),
+		NewPrivateEchoAdapter(),
 	)
 	service := NewService(registry)
 
 	response, err := service.CreateResponse(context.Background(), Request{
-		Model: "orb/private-example-text",
+		Model: privateEchoModelID,
 		Input: []InputMessage{{Role: "user", Content: []InputContent{{Type: "input_text", Text: "private hello"}}}},
 	})
 	if err != nil {
