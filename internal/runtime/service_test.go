@@ -6,7 +6,7 @@ import (
 )
 
 func TestServiceModels(t *testing.T) {
-	service := NewService(NewEchoAdapter())
+	service := NewService(DefaultRegistry())
 
 	models := service.Models(context.Background())
 	if len(models) != 1 {
@@ -19,7 +19,7 @@ func TestServiceModels(t *testing.T) {
 }
 
 func TestServiceCreateResponseRequiresModel(t *testing.T) {
-	service := NewService(NewEchoAdapter())
+	service := NewService(DefaultRegistry())
 
 	_, err := service.CreateResponse(context.Background(), Request{
 		Input: []InputMessage{{Role: "user", Content: []InputContent{{Type: "input_text", Text: "hello"}}}},
@@ -35,7 +35,7 @@ func TestServiceCreateResponseRequiresModel(t *testing.T) {
 }
 
 func TestServiceCreateResponseUsesEchoAdapter(t *testing.T) {
-	service := NewService(NewEchoAdapter())
+	service := NewService(DefaultRegistry())
 
 	response, err := service.CreateResponse(context.Background(), Request{
 		Model: "orb/example-text",
@@ -59,7 +59,7 @@ func TestServiceCreateResponseUsesEchoAdapter(t *testing.T) {
 }
 
 func TestServiceCreateResponseUnknownModel(t *testing.T) {
-	service := NewService(NewEchoAdapter())
+	service := NewService(DefaultRegistry())
 
 	_, err := service.CreateResponse(context.Background(), Request{
 		Model: "orb/unknown",
@@ -72,5 +72,36 @@ func TestServiceCreateResponseUnknownModel(t *testing.T) {
 	apiErr, ok := err.(*Error)
 	if !ok || apiErr.Code != "not_found" {
 		t.Fatalf("unexpected error: %#v", err)
+	}
+}
+
+func TestServiceRoutesToRegisteredAdapterByModel(t *testing.T) {
+	registry := NewRegistry(
+		NewEchoAdapter(),
+		NewStaticEchoAdapter("private-echo", Model{
+			ID:           "orb/private-example-text",
+			Object:       "model",
+			Provider:     "private-echo",
+			Deployment:   "private",
+			Capabilities: []string{"text"},
+			Status:       "ready",
+		}, "Private Echo: "),
+	)
+	service := NewService(registry)
+
+	response, err := service.CreateResponse(context.Background(), Request{
+		Model: "orb/private-example-text",
+		Input: []InputMessage{{Role: "user", Content: []InputContent{{Type: "input_text", Text: "private hello"}}}},
+	})
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+
+	if response.Runtime.Adapter != "private-echo" || response.Runtime.Deployment != "private" {
+		t.Fatalf("unexpected routed runtime metadata: %#v", response.Runtime)
+	}
+
+	if len(response.Output) != 1 || response.Output[0].Text != "Private Echo: private hello" {
+		t.Fatalf("unexpected routed output payload: %#v", response.Output)
 	}
 }

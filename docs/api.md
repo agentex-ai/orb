@@ -223,4 +223,5 @@ This API document is meant to narrow the first implementation target, not to
 freeze a final public contract yet.
 
 The current repository implementation serves an early subset of this API with a
-bundled local `echo` adapter and the model `orb/example-text`.
+model-routed adapter registry and a bundled local `echo` adapter for the model
+`orb/example-text`.

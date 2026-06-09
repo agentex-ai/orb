@@ -56,7 +56,8 @@ Current placeholder endpoints:
 - `GET /v1/models`
 - `POST /v1/responses`
 
-The current runtime uses a bundled local `echo` adapter with the model
+The current runtime uses a model-routed adapter registry. The default registry
+currently exposes a bundled local `echo` adapter with the model
 `orb/example-text`.
 
 ## Architecture Direction

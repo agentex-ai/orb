@@ -9,7 +9,7 @@ import (
 )
 
 type Service struct {
-	adapter Adapter
+	registry *Registry
 }
 
 type Adapter interface {
@@ -88,16 +88,16 @@ func (e *Error) Error() string {
 	return e.Message
 }
 
-func NewService(adapter Adapter) *Service {
-	if adapter == nil {
-		adapter = NewEchoAdapter()
+func NewService(registry *Registry) *Service {
+	if registry == nil {
+		registry = DefaultRegistry()
 	}
 
-	return &Service{adapter: adapter}
+	return &Service{registry: registry}
 }
 
 func (s *Service) Models(ctx context.Context) []Model {
-	models := s.adapter.Models(ctx)
+	models := s.registry.Models(ctx)
 	cloned := make([]Model, len(models))
 	copy(cloned, models)
 	return cloned
@@ -108,7 +108,12 @@ func (s *Service) CreateResponse(ctx context.Context, request Request) (Response
 		return Response{}, err
 	}
 
-	response, err := s.adapter.Generate(ctx, request)
+	adapter, model, err := s.registry.AdapterForModel(ctx, request.Model)
+	if err != nil {
+		return Response{}, err
+	}
+
+	response, err := adapter.Generate(ctx, request)
 	if err != nil {
 		return Response{}, normalizeError(err)
 	}
@@ -120,17 +125,17 @@ func (s *Service) CreateResponse(ctx context.Context, request Request) (Response
 		response.Object = "response"
 	}
 	if response.Model == "" {
-		response.Model = request.Model
+		response.Model = model.ID
 	}
 	if response.Runtime.Adapter == "" {
-		response.Runtime.Adapter = s.adapter.Name()
+		response.Runtime.Adapter = adapter.Name()
 	}
 	if response.Runtime.Deployment == "" {
-		response.Runtime.Deployment = "unknown"
+		response.Runtime.Deployment = model.Deployment
 	}
 	response.Runtime.MemoryApplied = request.Memory != nil && request.Memory.Enabled
 	if response.Runtime.Status == "" {
-		response.Runtime.Status = "ready"
+		response.Runtime.Status = model.Status
 	}
 
 	return response, nil

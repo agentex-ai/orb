@@ -87,12 +87,12 @@ type server struct {
 }
 
 func NewServer() http.Handler {
-	return NewServerWithService(orb.NewService(orb.NewEchoAdapter()))
+	return NewServerWithService(orb.NewService(orb.DefaultRegistry()))
 }
 
 func NewServerWithService(service *orb.Service) http.Handler {
 	if service == nil {
-		service = orb.NewService(orb.NewEchoAdapter())
+		service = orb.NewService(orb.DefaultRegistry())
 	}
 
 	api := server{service: service}

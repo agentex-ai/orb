@@ -2,50 +2,49 @@ package runtime
 
 import (
 	"context"
-	"fmt"
-	"net/http"
 )
 
 const echoModelID = "orb/example-text"
 
-type EchoAdapter struct{}
+type EchoAdapter struct {
+	name       string
+	model      Model
+	textPrefix string
+}
 
 func NewEchoAdapter() *EchoAdapter {
-	return &EchoAdapter{}
+	return NewStaticEchoAdapter("echo", Model{
+		ID:           echoModelID,
+		Object:       "model",
+		Provider:     "echo",
+		Deployment:   "local",
+		Capabilities: []string{"text"},
+		Status:       "ready",
+	}, "Echo: ")
+}
+
+func NewStaticEchoAdapter(name string, model Model, textPrefix string) *EchoAdapter {
+	return &EchoAdapter{
+		name:       name,
+		model:      model,
+		textPrefix: textPrefix,
+	}
 }
 
 func (a *EchoAdapter) Name() string {
-	return "echo"
+	return a.name
 }
 
 func (a *EchoAdapter) Models(context.Context) []Model {
-	return []Model{
-		{
-			ID:           echoModelID,
-			Object:       "model",
-			Provider:     a.Name(),
-			Deployment:   "local",
-			Capabilities: []string{"text"},
-			Status:       "ready",
-		},
-	}
+	return []Model{a.model}
 }
 
 func (a *EchoAdapter) Generate(_ context.Context, request Request) (Response, error) {
-	if request.Model != echoModelID {
-		return Response{}, &Error{
-			Code:       "not_found",
-			Message:    fmt.Sprintf("model %q is not available", request.Model),
-			Details:    map[string]any{"model": request.Model},
-			StatusCode: http.StatusNotFound,
-		}
-	}
-
 	text := firstInputText(request.Input)
 	if text == "" {
 		text = "Echo adapter received the request, but no input_text content was found."
 	} else {
-		text = "Echo: " + text
+		text = a.textPrefix + text
 	}
 
 	return Response{
@@ -58,8 +57,8 @@ func (a *EchoAdapter) Generate(_ context.Context, request Request) (Response, er
 		},
 		Runtime: Runtime{
 			Adapter:    a.Name(),
-			Deployment: "local",
-			Status:     "ready",
+			Deployment: a.model.Deployment,
+			Status:     a.model.Status,
 		},
 	}, nil
 }
