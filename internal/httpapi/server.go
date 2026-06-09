@@ -1,12 +1,11 @@
 package httpapi
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"net/http"
-	"strings"
+
+	orb "github.com/agentex-ai/orb/internal/runtime"
 )
 
 type Model struct {
@@ -83,32 +82,47 @@ type APIError struct {
 	Details map[string]any `json:"details,omitempty"`
 }
 
-var stubModels = []Model{
-	{
-		ID:           "orb/example-text",
-		Object:       "model",
-		Provider:     "stub",
-		Deployment:   "local",
-		Capabilities: []string{"text"},
-		Status:       "stub",
-	},
+type server struct {
+	service *orb.Service
 }
 
 func NewServer() http.Handler {
+	return NewServerWithService(orb.NewService(orb.NewEchoAdapter()))
+}
+
+func NewServerWithService(service *orb.Service) http.Handler {
+	if service == nil {
+		service = orb.NewService(orb.NewEchoAdapter())
+	}
+
+	api := server{service: service}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /v1/models", handleModels)
-	mux.HandleFunc("POST /v1/responses", handleResponses)
+	mux.HandleFunc("GET /v1/models", api.handleModels)
+	mux.HandleFunc("POST /v1/responses", api.handleResponses)
 	return mux
 }
 
-func handleModels(writer http.ResponseWriter, request *http.Request) {
+func (s server) handleModels(writer http.ResponseWriter, request *http.Request) {
+	models := s.service.Models(request.Context())
+	data := make([]Model, 0, len(models))
+	for _, model := range models {
+		data = append(data, Model{
+			ID:           model.ID,
+			Object:       model.Object,
+			Provider:     model.Provider,
+			Deployment:   model.Deployment,
+			Capabilities: model.Capabilities,
+			Status:       model.Status,
+		})
+	}
+
 	writeJSON(writer, http.StatusOK, ModelList{
 		Object: "list",
-		Data:   stubModels,
+		Data:   data,
 	})
 }
 
-func handleResponses(writer http.ResponseWriter, request *http.Request) {
+func (s server) handleResponses(writer http.ResponseWriter, request *http.Request) {
 	defer request.Body.Close()
 
 	var payload ResponseRequest
@@ -120,83 +134,56 @@ func handleResponses(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 
-	if strings.TrimSpace(payload.Model) == "" {
-		writeError(writer, http.StatusBadRequest, APIError{
-			Code:    "invalid_argument",
-			Message: "model is required",
-			Details: map[string]any{"field": "model"},
-		})
-		return
-	}
-
-	if len(payload.Input) == 0 {
-		writeError(writer, http.StatusBadRequest, APIError{
-			Code:    "invalid_argument",
-			Message: "input is required",
-			Details: map[string]any{"field": "input"},
-		})
+	response, err := s.service.CreateResponse(request.Context(), orb.Request{
+		Model:    payload.Model,
+		Input:    toRuntimeInput(payload.Input),
+		Memory:   toRuntimeMemory(payload.Memory),
+		Metadata: payload.Metadata,
+		Settings: payload.Settings,
+	})
+	if err != nil {
+		writeServiceError(writer, err)
 		return
 	}
 
 	writeJSON(writer, http.StatusOK, ResponseEnvelope{
-		ID:     newResponseID(),
-		Object: "response",
-		Model:  payload.Model,
-		Output: []OutputItem{
-			{
-				Type: "output_text",
-				Text: placeholderText(payload),
-			},
+		ID:     response.ID,
+		Object: response.Object,
+		Model:  response.Model,
+		Output: toHTTPOutput(response.Output),
+		Usage: Usage{
+			InputTokens:  response.Usage.InputTokens,
+			OutputTokens: response.Usage.OutputTokens,
+			TotalTokens:  response.Usage.TotalTokens,
 		},
-		Usage: Usage{},
 		Runtime: Runtime{
-			Adapter:       "stub",
-			Deployment:    "local",
-			MemoryApplied: payload.Memory != nil && payload.Memory.Enabled,
-			Status:        "stub",
+			Adapter:       response.Runtime.Adapter,
+			Deployment:    response.Runtime.Deployment,
+			MemoryApplied: response.Runtime.MemoryApplied,
+			Status:        response.Runtime.Status,
 		},
 	})
 }
 
-func placeholderText(request ResponseRequest) string {
-	snippet := firstInputText(request.Input)
-	if snippet == "" {
-		return fmt.Sprintf("Orb runtime skeleton accepted the request for model %q. Provider execution is not implemented yet.", request.Model)
-	}
-
-	return fmt.Sprintf("Orb runtime skeleton accepted the request for model %q. Provider execution is not implemented yet. First input: %s", request.Model, snippet)
-}
-
-func firstInputText(messages []InputMessage) string {
-	for _, message := range messages {
-		for _, content := range message.Content {
-			if content.Type == "input_text" {
-				text := strings.TrimSpace(content.Text)
-				if text == "" {
-					continue
-				}
-				if len(text) > 120 {
-					return text[:120] + "..."
-				}
-				return text
-			}
-		}
-	}
-
-	return ""
-}
-
-func newResponseID() string {
-	randomBytes := make([]byte, 8)
-	if _, err := rand.Read(randomBytes); err != nil {
-		return "resp_fallback"
-	}
-
-	return "resp_" + hex.EncodeToString(randomBytes)
-}
-
 func writeError(writer http.ResponseWriter, status int, apiError APIError) {
 	writeJSON(writer, status, ErrorEnvelope{Error: apiError})
+}
+
+func writeServiceError(writer http.ResponseWriter, err error) {
+	var apiErr *orb.Error
+	if errors.As(err, &apiErr) {
+		writeError(writer, apiErr.StatusCode, APIError{
+			Code:    apiErr.Code,
+			Message: apiErr.Message,
+			Details: apiErr.Details,
+		})
+		return
+	}
+
+	writeError(writer, http.StatusInternalServerError, APIError{
+		Code:    "internal_error",
+		Message: "unexpected runtime error",
+	})
 }
 
 func writeJSON(writer http.ResponseWriter, status int, payload any) {
@@ -205,4 +192,47 @@ func writeJSON(writer http.ResponseWriter, status int, payload any) {
 	if err := json.NewEncoder(writer).Encode(payload); err != nil {
 		http.Error(writer, `{"error":{"code":"internal_error","message":"failed to encode response"}}`, http.StatusInternalServerError)
 	}
+}
+
+func toRuntimeInput(messages []InputMessage) []orb.InputMessage {
+	result := make([]orb.InputMessage, 0, len(messages))
+	for _, message := range messages {
+		content := make([]orb.InputContent, 0, len(message.Content))
+		for _, item := range message.Content {
+			content = append(content, orb.InputContent{
+				Type: item.Type,
+				Text: item.Text,
+			})
+		}
+
+		result = append(result, orb.InputMessage{
+			Role:    message.Role,
+			Content: content,
+		})
+	}
+
+	return result
+}
+
+func toRuntimeMemory(memory *MemoryRequest) *orb.MemoryRequest {
+	if memory == nil {
+		return nil
+	}
+
+	return &orb.MemoryRequest{
+		Enabled: memory.Enabled,
+		Scope:   memory.Scope,
+	}
+}
+
+func toHTTPOutput(items []orb.OutputItem) []OutputItem {
+	output := make([]OutputItem, 0, len(items))
+	for _, item := range items {
+		output = append(output, OutputItem{
+			Type: item.Type,
+			Text: item.Text,
+		})
+	}
+
+	return output
 }

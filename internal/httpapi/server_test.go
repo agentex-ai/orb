@@ -31,6 +31,10 @@ func TestModels(t *testing.T) {
 	if len(response.Data) != 1 || response.Data[0].ID != "orb/example-text" {
 		t.Fatalf("unexpected model list: %#v", response.Data)
 	}
+
+	if response.Data[0].Provider != "echo" {
+		t.Fatalf("expected echo provider, got %#v", response.Data[0])
+	}
 }
 
 func TestResponsesRequiresModel(t *testing.T) {
@@ -49,7 +53,7 @@ func TestResponsesRequiresModel(t *testing.T) {
 	}
 }
 
-func TestResponsesReturnsStubPayload(t *testing.T) {
+func TestResponsesReturnsEchoPayload(t *testing.T) {
 	body := []byte(`{
 		"model":"orb/example-text",
 		"input":[{"role":"user","content":[{"type":"input_text","text":"hello orb"}]}],
@@ -73,11 +77,30 @@ func TestResponsesReturnsStubPayload(t *testing.T) {
 		t.Fatalf("expected response object, got %q", response.Object)
 	}
 
-	if response.Runtime.Adapter != "stub" || !response.Runtime.MemoryApplied {
+	if response.Runtime.Adapter != "echo" || !response.Runtime.MemoryApplied {
 		t.Fatalf("unexpected runtime metadata: %#v", response.Runtime)
 	}
 
-	if len(response.Output) != 1 || !strings.Contains(response.Output[0].Text, "hello orb") {
+	if len(response.Output) != 1 || response.Output[0].Text != "Echo: hello orb" {
 		t.Fatalf("unexpected output payload: %#v", response.Output)
+	}
+}
+
+func TestResponsesUnknownModel(t *testing.T) {
+	body := []byte(`{
+		"model":"orb/unknown",
+		"input":[{"role":"user","content":[{"type":"input_text","text":"hello orb"}]}]
+	}`)
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	recorder := httptest.NewRecorder()
+
+	NewServer().ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d", recorder.Code)
+	}
+
+	if !strings.Contains(recorder.Body.String(), `"not_found"`) {
+		t.Fatalf("expected not found error, got %s", recorder.Body.String())
 	}
 }

@@ -56,6 +56,9 @@ Current placeholder endpoints:
 - `GET /v1/models`
 - `POST /v1/responses`
 
+The current runtime uses a bundled local `echo` adapter with the model
+`orb/example-text`.
+
 ## Architecture Direction
 
 Orb is expected to evolve around a small set of runtime responsibilities:
@@ -77,7 +80,7 @@ Early implementation skeleton.
 
 This repository currently exists to establish the public home for Agentex Orb
 and to document its intended direction. It now includes a minimal HTTP service
-with placeholder runtime endpoints, but it does not yet contain production
+and an adapter-backed runtime skeleton, but it does not yet contain production
 runtime code.
 
 ## License
