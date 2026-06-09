@@ -233,4 +233,5 @@ routing across more than one deployment type.
 When `ORB_PRIVATE_BASE_URL` is configured, the default private model route is
 served by a `private-http` adapter that forwards Orb-style `/v1/responses`
 requests to an upstream private runtime. That adapter can also attach an auth
-header for upstream private deployments.
+header for upstream private deployments, and it can surface upstream discovery
+metadata through `GET /v1/models`.

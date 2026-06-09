@@ -86,6 +86,91 @@ func TestPrivateHTTPAdapterGenerate(t *testing.T) {
 	}
 }
 
+func TestPrivateHTTPAdapterModelsUsesUpstreamDiscovery(t *testing.T) {
+	var gotAuth string
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/models" {
+			t.Fatalf("expected /v1/models, got %s", request.URL.Path)
+		}
+		gotAuth = request.Header.Get("Authorization")
+		writer.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(writer).Encode(privateHTTPModelList{
+			Object: "list",
+			Data: []privateHTTPModel{
+				{
+					ID:           "upstream-private",
+					Object:       "model",
+					Provider:     "vllm",
+					Deployment:   "private",
+					Capabilities: []string{"text", "tools"},
+					Status:       "warm",
+				},
+			},
+		})
+	}))
+	defer upstream.Close()
+
+	adapter, err := NewPrivateHTTPAdapter(PrivateHTTPAdapterConfig{
+		BaseURL:         upstream.URL,
+		PublicModelID:   privateEchoModelID,
+		UpstreamModelID: "upstream-private",
+		AuthToken:       "secret-token",
+		Client:          upstream.Client(),
+	})
+	if err != nil {
+		t.Fatalf("expected adapter config success, got %v", err)
+	}
+
+	models := adapter.Models(context.Background())
+	if len(models) != 1 {
+		t.Fatalf("expected one discovered model, got %d", len(models))
+	}
+
+	if gotAuth != "Bearer secret-token" {
+		t.Fatalf("expected bearer auth on discovery request, got %q", gotAuth)
+	}
+
+	model := models[0]
+	if model.ID != privateEchoModelID || model.Provider != "private-http" || model.Status != "warm" {
+		t.Fatalf("unexpected discovered model payload: %#v", model)
+	}
+
+	if len(model.Capabilities) != 2 || model.Capabilities[1] != "tools" {
+		t.Fatalf("unexpected discovered capabilities: %#v", model.Capabilities)
+	}
+
+	if model.Metadata["discovery"] != "upstream" || model.Metadata["upstream_provider"] != "vllm" {
+		t.Fatalf("unexpected discovered metadata: %#v", model.Metadata)
+	}
+}
+
+func TestPrivateHTTPAdapterModelsFallsBackWhenDiscoveryFails(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		http.Error(writer, `{"error":{"code":"backend_unavailable","message":"no models"}}`, http.StatusBadGateway)
+	}))
+	defer upstream.Close()
+
+	adapter, err := NewPrivateHTTPAdapter(PrivateHTTPAdapterConfig{
+		BaseURL:         upstream.URL,
+		PublicModelID:   privateEchoModelID,
+		UpstreamModelID: "upstream-private",
+		Client:          upstream.Client(),
+	})
+	if err != nil {
+		t.Fatalf("expected adapter config success, got %v", err)
+	}
+
+	models := adapter.Models(context.Background())
+	if len(models) != 1 {
+		t.Fatalf("expected one fallback model, got %d", len(models))
+	}
+
+	model := models[0]
+	if model.Metadata["discovery"] != "fallback" || model.Metadata["upstream_model_id"] != "upstream-private" {
+		t.Fatalf("unexpected fallback metadata: %#v", model.Metadata)
+	}
+}
+
 func TestPrivateHTTPAdapterGenerateWithCustomAuthHeader(t *testing.T) {
 	var gotHeader string
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -146,5 +231,9 @@ func TestConfiguredRegistryUsesPrivateHTTPAdapter(t *testing.T) {
 
 	if models[1].Provider != "private-http" || models[1].ID != privateEchoModelID {
 		t.Fatalf("expected configured private http model, got %#v", models[1])
+	}
+
+	if models[1].Metadata["discovery"] != "fallback" {
+		t.Fatalf("expected fallback metadata, got %#v", models[1].Metadata)
 	}
 }

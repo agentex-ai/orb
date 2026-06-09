@@ -9,12 +9,13 @@ import (
 )
 
 type Model struct {
-	ID           string   `json:"id"`
-	Object       string   `json:"object"`
-	Provider     string   `json:"provider"`
-	Deployment   string   `json:"deployment"`
-	Capabilities []string `json:"capabilities"`
-	Status       string   `json:"status,omitempty"`
+	ID           string         `json:"id"`
+	Object       string         `json:"object"`
+	Provider     string         `json:"provider"`
+	Deployment   string         `json:"deployment"`
+	Capabilities []string       `json:"capabilities"`
+	Status       string         `json:"status,omitempty"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
 }
 
 type ModelList struct {
@@ -113,6 +114,7 @@ func (s server) handleModels(writer http.ResponseWriter, request *http.Request) 
 			Deployment:   model.Deployment,
 			Capabilities: model.Capabilities,
 			Status:       model.Status,
+			Metadata:     model.Metadata,
 		})
 	}
 

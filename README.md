@@ -75,6 +75,9 @@ swapped to a `private-http` adapter that forwards `POST /v1/responses` calls to
 the upstream runtime. Optional auth headers can be attached through
 `ORB_PRIVATE_AUTH_HEADER` and `ORB_PRIVATE_AUTH_TOKEN`.
 
+When private routing is configured, `GET /v1/models` also attempts upstream
+model discovery and includes discovery metadata for the exposed private model.
+
 ## Architecture Direction
 
 Orb is expected to evolve around a small set of runtime responsibilities:

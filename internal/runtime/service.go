@@ -25,6 +25,7 @@ type Model struct {
 	Deployment   string
 	Capabilities []string
 	Status       string
+	Metadata     map[string]any
 }
 
 type Request struct {
