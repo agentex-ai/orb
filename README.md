@@ -56,6 +56,8 @@ Optional private routing environment variables:
 - `ORB_PRIVATE_BASE_URL`: upstream Orb-compatible private runtime base URL
 - `ORB_PRIVATE_MODEL_ID`: local model id to expose, defaults to `orb/private-example-text`
 - `ORB_PRIVATE_UPSTREAM_MODEL`: model id sent to the upstream runtime, defaults to the local private model id
+- `ORB_PRIVATE_AUTH_HEADER`: auth header name for upstream private requests, defaults to `Authorization`
+- `ORB_PRIVATE_AUTH_TOKEN`: auth token for upstream private requests; when using `Authorization`, Orb sends `Bearer <token>` unless the token already contains a space
 
 Current placeholder endpoints:
 
@@ -70,7 +72,8 @@ currently exposes:
 
 When `ORB_PRIVATE_BASE_URL` is configured, the default private model route is
 swapped to a `private-http` adapter that forwards `POST /v1/responses` calls to
-the upstream runtime.
+the upstream runtime. Optional auth headers can be attached through
+`ORB_PRIVATE_AUTH_HEADER` and `ORB_PRIVATE_AUTH_TOKEN`.
 
 ## Architecture Direction
 

@@ -15,6 +15,8 @@ type PrivateHTTPAdapterConfig struct {
 	BaseURL         string
 	PublicModelID   string
 	UpstreamModelID string
+	AuthHeader      string
+	AuthToken       string
 	Client          *http.Client
 }
 
@@ -22,6 +24,8 @@ type PrivateHTTPAdapter struct {
 	baseURL         string
 	publicModelID   string
 	upstreamModelID string
+	authHeader      string
+	authToken       string
 	client          *http.Client
 }
 
@@ -115,6 +119,8 @@ func NewPrivateHTTPAdapter(config PrivateHTTPAdapterConfig) (*PrivateHTTPAdapter
 		baseURL:         strings.TrimRight(parsedURL.String(), "/"),
 		publicModelID:   publicModelID,
 		upstreamModelID: upstreamModelID,
+		authHeader:      strings.TrimSpace(config.AuthHeader),
+		authToken:       strings.TrimSpace(config.AuthToken),
 		client:          client,
 	}, nil
 }
@@ -161,6 +167,7 @@ func (a *PrivateHTTPAdapter) Generate(ctx context.Context, request Request) (Res
 		}
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
+	a.applyAuthHeader(httpRequest)
 
 	httpResponse, err := a.client.Do(httpRequest)
 	if err != nil {
@@ -213,6 +220,21 @@ func (a *PrivateHTTPAdapter) Generate(ctx context.Context, request Request) (Res
 			Status:        defaultString(upstream.Runtime.Status, "ready"),
 		},
 	}, nil
+}
+
+func (a *PrivateHTTPAdapter) applyAuthHeader(request *http.Request) {
+	token := strings.TrimSpace(a.authToken)
+	if token == "" {
+		return
+	}
+
+	headerName := defaultString(a.authHeader, "Authorization")
+	headerValue := token
+	if strings.EqualFold(headerName, "Authorization") && !strings.Contains(token, " ") {
+		headerValue = "Bearer " + token
+	}
+
+	request.Header.Set(headerName, headerValue)
 }
 
 func toPrivateHTTPInput(messages []InputMessage) []privateHTTPInputMessage {

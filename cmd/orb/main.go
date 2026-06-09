@@ -22,6 +22,8 @@ func main() {
 			PrivateBaseURL:         os.Getenv("ORB_PRIVATE_BASE_URL"),
 			PrivateModelID:         os.Getenv("ORB_PRIVATE_MODEL_ID"),
 			PrivateUpstreamModelID: os.Getenv("ORB_PRIVATE_UPSTREAM_MODEL"),
+			PrivateAuthHeader:      os.Getenv("ORB_PRIVATE_AUTH_HEADER"),
+			PrivateAuthToken:       os.Getenv("ORB_PRIVATE_AUTH_TOKEN"),
 		}))),
 	}
 

@@ -34,6 +34,8 @@ type RegistryConfig struct {
 	PrivateBaseURL         string
 	PrivateModelID         string
 	PrivateUpstreamModelID string
+	PrivateAuthHeader      string
+	PrivateAuthToken       string
 	HTTPClient             *http.Client
 }
 
@@ -46,6 +48,8 @@ func ConfiguredRegistry(config RegistryConfig) *Registry {
 		BaseURL:         config.PrivateBaseURL,
 		PublicModelID:   config.PrivateModelID,
 		UpstreamModelID: config.PrivateUpstreamModelID,
+		AuthHeader:      config.PrivateAuthHeader,
+		AuthToken:       config.PrivateAuthToken,
 		Client:          config.HTTPClient,
 	})
 	if err != nil {

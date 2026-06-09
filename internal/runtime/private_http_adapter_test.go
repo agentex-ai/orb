@@ -10,10 +10,12 @@ import (
 
 func TestPrivateHTTPAdapterGenerate(t *testing.T) {
 	var gotBody privateHTTPRequest
+	var gotAuth string
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/v1/responses" {
 			t.Fatalf("expected /v1/responses, got %s", request.URL.Path)
 		}
+		gotAuth = request.Header.Get("Authorization")
 
 		if err := json.NewDecoder(request.Body).Decode(&gotBody); err != nil {
 			t.Fatalf("expected valid upstream body: %v", err)
@@ -44,6 +46,7 @@ func TestPrivateHTTPAdapterGenerate(t *testing.T) {
 		BaseURL:         upstream.URL,
 		PublicModelID:   privateEchoModelID,
 		UpstreamModelID: "upstream-model",
+		AuthToken:       "secret-token",
 		Client:          upstream.Client(),
 	})
 	if err != nil {
@@ -66,6 +69,10 @@ func TestPrivateHTTPAdapterGenerate(t *testing.T) {
 		t.Fatalf("expected upstream model id, got %#v", gotBody)
 	}
 
+	if gotAuth != "Bearer secret-token" {
+		t.Fatalf("expected bearer auth header, got %q", gotAuth)
+	}
+
 	if response.Runtime.Adapter != "private-http" || response.Runtime.Deployment != "private" {
 		t.Fatalf("unexpected runtime metadata: %#v", response.Runtime)
 	}
@@ -76,6 +83,48 @@ func TestPrivateHTTPAdapterGenerate(t *testing.T) {
 
 	if response.Usage.TotalTokens != 16 {
 		t.Fatalf("unexpected usage payload: %#v", response.Usage)
+	}
+}
+
+func TestPrivateHTTPAdapterGenerateWithCustomAuthHeader(t *testing.T) {
+	var gotHeader string
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotHeader = request.Header.Get("X-API-Key")
+		writer.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(writer).Encode(privateHTTPResponse{
+			ID:     "resp_upstream",
+			Object: "response",
+			Model:  "upstream-model",
+			Output: []privateHTTPResponseItem{{Type: "output_text", Text: "ok"}},
+			Runtime: privateHTTPRuntimeMetadata{
+				Status: "ready",
+			},
+		})
+	}))
+	defer upstream.Close()
+
+	adapter, err := NewPrivateHTTPAdapter(PrivateHTTPAdapterConfig{
+		BaseURL:         upstream.URL,
+		PublicModelID:   privateEchoModelID,
+		UpstreamModelID: "upstream-model",
+		AuthHeader:      "X-API-Key",
+		AuthToken:       "plain-key",
+		Client:          upstream.Client(),
+	})
+	if err != nil {
+		t.Fatalf("expected adapter config success, got %v", err)
+	}
+
+	_, err = adapter.Generate(context.Background(), Request{
+		Model: privateEchoModelID,
+		Input: []InputMessage{{Role: "user", Content: []InputContent{{Type: "input_text", Text: "hello private"}}}},
+	})
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+
+	if gotHeader != "plain-key" {
+		t.Fatalf("expected custom auth header, got %q", gotHeader)
 	}
 }
 
