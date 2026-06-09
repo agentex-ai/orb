@@ -34,6 +34,11 @@ The long-term goal is to support:
 - **Orb Adapters**: provider and model integration points for first-party,
   third-party, and private models.
 
+## Documents
+
+- [Architecture Direction](docs/architecture.md)
+- [Roadmap](docs/roadmap.md)
+
 ## Architecture Direction
 
 Orb is expected to evolve around a small set of runtime responsibilities:
