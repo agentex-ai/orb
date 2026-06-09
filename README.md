@@ -37,6 +37,7 @@ The long-term goal is to support:
 ## Documents
 
 - [Architecture Direction](docs/architecture.md)
+- [API Draft](docs/api.md)
 - [Roadmap](docs/roadmap.md)
 
 ## Architecture Direction
