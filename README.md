@@ -40,6 +40,22 @@ The long-term goal is to support:
 - [API Draft](docs/api.md)
 - [Roadmap](docs/roadmap.md)
 
+## Quick Start
+
+Run the current Orb skeleton locally:
+
+```bash
+go run ./cmd/orb
+```
+
+The server listens on `:8080` by default. Set `ORB_ADDR` to override the bind
+address.
+
+Current placeholder endpoints:
+
+- `GET /v1/models`
+- `POST /v1/responses`
+
 ## Architecture Direction
 
 Orb is expected to evolve around a small set of runtime responsibilities:
@@ -57,10 +73,11 @@ implementation.
 
 ## Status
 
-Early planning / pre-implementation.
+Early implementation skeleton.
 
 This repository currently exists to establish the public home for Agentex Orb
-and to document its intended direction. It does not yet contain production
+and to document its intended direction. It now includes a minimal HTTP service
+with placeholder runtime endpoints, but it does not yet contain production
 runtime code.
 
 ## License
