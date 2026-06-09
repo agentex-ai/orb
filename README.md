@@ -51,6 +51,12 @@ go run ./cmd/orb
 The server listens on `:8080` by default. Set `ORB_ADDR` to override the bind
 address.
 
+Optional private routing environment variables:
+
+- `ORB_PRIVATE_BASE_URL`: upstream Orb-compatible private runtime base URL
+- `ORB_PRIVATE_MODEL_ID`: local model id to expose, defaults to `orb/private-example-text`
+- `ORB_PRIVATE_UPSTREAM_MODEL`: model id sent to the upstream runtime, defaults to the local private model id
+
 Current placeholder endpoints:
 
 - `GET /v1/models`
@@ -61,6 +67,10 @@ currently exposes:
 
 - a bundled local `echo` adapter with the model `orb/example-text`
 - a bundled private-style `echo` adapter with the model `orb/private-example-text`
+
+When `ORB_PRIVATE_BASE_URL` is configured, the default private model route is
+swapped to a `private-http` adapter that forwards `POST /v1/responses` calls to
+the upstream runtime.
 
 ## Architecture Direction
 

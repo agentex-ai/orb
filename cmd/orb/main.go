@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/agentex-ai/orb/internal/httpapi"
+	"github.com/agentex-ai/orb/internal/runtime"
 )
 
 func main() {
@@ -16,8 +17,12 @@ func main() {
 	}
 
 	server := &http.Server{
-		Addr:    addr,
-		Handler: httpapi.NewServer(),
+		Addr: addr,
+		Handler: httpapi.NewServerWithService(runtime.NewService(runtime.ConfiguredRegistry(runtime.RegistryConfig{
+			PrivateBaseURL:         os.Getenv("ORB_PRIVATE_BASE_URL"),
+			PrivateModelID:         os.Getenv("ORB_PRIVATE_MODEL_ID"),
+			PrivateUpstreamModelID: os.Getenv("ORB_PRIVATE_UPSTREAM_MODEL"),
+		}))),
 	}
 
 	log.Printf("orb listening on %s", addr)

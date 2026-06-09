@@ -229,3 +229,7 @@ model-routed adapter registry and a bundled local `echo` adapter for the model
 The default runtime also exposes a bundled private-style model,
 `orb/private-example-text`, so the current skeleton already exercises model
 routing across more than one deployment type.
+
+When `ORB_PRIVATE_BASE_URL` is configured, the default private model route is
+served by a `private-http` adapter that forwards Orb-style `/v1/responses`
+requests to an upstream private runtime.

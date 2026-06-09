@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"strings"
 )
@@ -26,6 +27,35 @@ func DefaultRegistry() *Registry {
 	return NewRegistry(
 		NewEchoAdapter(),
 		NewPrivateEchoAdapter(),
+	)
+}
+
+type RegistryConfig struct {
+	PrivateBaseURL         string
+	PrivateModelID         string
+	PrivateUpstreamModelID string
+	HTTPClient             *http.Client
+}
+
+func ConfiguredRegistry(config RegistryConfig) *Registry {
+	if strings.TrimSpace(config.PrivateBaseURL) == "" {
+		return DefaultRegistry()
+	}
+
+	privateAdapter, err := NewPrivateHTTPAdapter(PrivateHTTPAdapterConfig{
+		BaseURL:         config.PrivateBaseURL,
+		PublicModelID:   config.PrivateModelID,
+		UpstreamModelID: config.PrivateUpstreamModelID,
+		Client:          config.HTTPClient,
+	})
+	if err != nil {
+		log.Printf("orb: invalid private http adapter config, falling back to bundled private adapter: %v", err)
+		return DefaultRegistry()
+	}
+
+	return NewRegistry(
+		NewEchoAdapter(),
+		privateAdapter,
 	)
 }
 
