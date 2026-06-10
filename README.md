@@ -70,6 +70,7 @@ Current implemented endpoints:
 
 - `GET /v1/models`
 - `POST /v1/responses`
+- `GET /v1/responses/{response_id}`
 
 Try the bundled local model:
 
@@ -91,6 +92,9 @@ curl http://localhost:8080/v1/responses \
     ]
   }'
 ```
+
+Current response retrieval is a placeholder route. It returns `not_found` until
+Orb grows a persistence layer for stored responses and asynchronous retrieval.
 
 The current runtime uses a model-routed adapter registry. The default registry
 currently exposes:

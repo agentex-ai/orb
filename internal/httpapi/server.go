@@ -104,6 +104,7 @@ func NewServerWithService(service *orb.Service) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/models", api.handleModels)
 	mux.HandleFunc("POST /v1/responses", api.handleResponses)
+	mux.HandleFunc("GET /v1/responses/{response_id}", api.handleResponseByID)
 	return mux
 }
 
@@ -195,6 +196,27 @@ func (s server) handleResponses(writer http.ResponseWriter, request *http.Reques
 			Deployment:    response.Runtime.Deployment,
 			MemoryApplied: response.Runtime.MemoryApplied,
 			Status:        response.Runtime.Status,
+		},
+	})
+}
+
+func (s server) handleResponseByID(writer http.ResponseWriter, request *http.Request) {
+	responseID := strings.TrimSpace(request.PathValue("response_id"))
+	if responseID == "" {
+		writeError(writer, http.StatusBadRequest, APIError{
+			Code:    "invalid_argument",
+			Message: "response_id is required",
+			Details: map[string]any{"field": "response_id"},
+		})
+		return
+	}
+
+	writeError(writer, http.StatusNotFound, APIError{
+		Code:    "not_found",
+		Message: "response " + `"` + responseID + `"` + " is not available in the current runtime",
+		Details: map[string]any{
+			"response_id": responseID,
+			"persistence": "disabled",
 		},
 	})
 }

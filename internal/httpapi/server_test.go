@@ -143,6 +143,44 @@ func TestResponsesReturnsPrivateEchoPayload(t *testing.T) {
 	}
 }
 
+func TestResponseByIDReturnsNotFoundPlaceholder(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/v1/responses/resp_123", nil)
+	recorder := httptest.NewRecorder()
+
+	NewServer().ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d", recorder.Code)
+	}
+
+	if contentType := recorder.Header().Get("Content-Type"); contentType != "application/json" {
+		t.Fatalf("expected json content type, got %q", contentType)
+	}
+
+	if !strings.Contains(recorder.Body.String(), `"not_found"`) {
+		t.Fatalf("expected not_found error, got %s", recorder.Body.String())
+	}
+
+	if !strings.Contains(recorder.Body.String(), `"persistence":"disabled"`) {
+		t.Fatalf("expected persistence placeholder detail, got %s", recorder.Body.String())
+	}
+}
+
+func TestResponseByIDRejectsBlankIdentifier(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/v1/responses/%20", nil)
+	recorder := httptest.NewRecorder()
+
+	NewServer().ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", recorder.Code)
+	}
+
+	if !strings.Contains(recorder.Body.String(), `"response_id is required"`) {
+		t.Fatalf("expected response_id validation error, got %s", recorder.Body.String())
+	}
+}
+
 func TestModelsIncludesConfiguredOpenAIModel(t *testing.T) {
 	service := orb.NewService(orb.ConfiguredRegistry(orb.RegistryConfig{
 		OpenAIAPIKey:  "test-key",

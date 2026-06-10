@@ -292,6 +292,28 @@ curl -N http://localhost:8080/v1/responses \
 `GET /v1/responses/{response_id}` should provide a retrieval path for runtimes
 that persist response metadata or support asynchronous workflows later.
 
+Current implementation example:
+
+```bash
+curl http://localhost:8080/v1/responses/resp_123
+```
+
+```json
+{
+  "error": {
+    "code": "not_found",
+    "message": "response \"resp_123\" is not available in the current runtime",
+    "details": {
+      "response_id": "resp_123",
+      "persistence": "disabled"
+    }
+  }
+}
+```
+
+The current server exposes this route as a placeholder so clients can depend on
+the path shape early. Orb does not yet persist responses for later lookup.
+
 ### Memory
 
 `POST /v1/memory/query` should expose a narrow memory retrieval path that can be
@@ -379,6 +401,10 @@ final public contract yet.
 The current repository implementation serves an early subset of this API with a
 model-routed adapter registry and a bundled local `echo` adapter for the model
 `orb/example-text`.
+
+The current HTTP server also exposes `GET /v1/responses/{response_id}` as a
+placeholder retrieval route. Today it returns a structured `not_found` response
+because response persistence is not implemented yet.
 
 When `ORB_OPENAI_API_KEY` and `ORB_OPENAI_MODEL_ID` are configured, the runtime
 also exposes a hosted OpenAI-backed model as `orb/openai/<model-id>` by
