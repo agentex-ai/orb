@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 )
+
+const privateDiscoveredModelPrefix = "orb/private/"
 
 type PrivateHTTPAdapterConfig struct {
 	BaseURL         string
@@ -24,9 +27,15 @@ type PrivateHTTPAdapter struct {
 	baseURL         string
 	publicModelID   string
 	upstreamModelID string
+	singleMapping   bool
 	authHeader      string
 	authToken       string
 	client          *http.Client
+}
+
+type privateHTTPResolvedModel struct {
+	Model           Model
+	UpstreamModelID string
 }
 
 type privateHTTPRequest struct {
@@ -115,13 +124,15 @@ func NewPrivateHTTPAdapter(config PrivateHTTPAdapterConfig) (*PrivateHTTPAdapter
 	}
 
 	publicModelID := strings.TrimSpace(config.PublicModelID)
-	if publicModelID == "" {
-		publicModelID = privateEchoModelID
-	}
-
 	upstreamModelID := strings.TrimSpace(config.UpstreamModelID)
-	if upstreamModelID == "" {
-		upstreamModelID = publicModelID
+	singleMapping := publicModelID != "" || upstreamModelID != ""
+	if singleMapping {
+		if publicModelID == "" {
+			publicModelID = privateEchoModelID
+		}
+		if upstreamModelID == "" {
+			upstreamModelID = publicModelID
+		}
 	}
 
 	client := config.Client
@@ -133,6 +144,7 @@ func NewPrivateHTTPAdapter(config PrivateHTTPAdapterConfig) (*PrivateHTTPAdapter
 		baseURL:         strings.TrimRight(parsedURL.String(), "/"),
 		publicModelID:   publicModelID,
 		upstreamModelID: upstreamModelID,
+		singleMapping:   singleMapping,
 		authHeader:      strings.TrimSpace(config.AuthHeader),
 		authToken:       strings.TrimSpace(config.AuthToken),
 		client:          client,
@@ -144,22 +156,15 @@ func (a *PrivateHTTPAdapter) Name() string {
 }
 
 func (a *PrivateHTTPAdapter) Models(ctx context.Context) []Model {
-	return []Model{a.discoverModel(ctx)}
+	if a.singleMapping {
+		return []Model{a.discoverSingleModel(ctx)}
+	}
+
+	return a.discoverModels(ctx)
 }
 
-func (a *PrivateHTTPAdapter) discoverModel(ctx context.Context) Model {
-	fallback := Model{
-		ID:           a.publicModelID,
-		Object:       "model",
-		Provider:     a.Name(),
-		Deployment:   "private",
-		Capabilities: []string{"text"},
-		Status:       "ready",
-		Metadata: map[string]any{
-			"discovery":         "fallback",
-			"upstream_model_id": a.upstreamModelID,
-		},
-	}
+func (a *PrivateHTTPAdapter) discoverSingleModel(ctx context.Context) Model {
+	fallback := a.fallbackSingleModel()
 
 	models, err := a.fetchModels(ctx)
 	if err != nil {
@@ -171,28 +176,48 @@ func (a *PrivateHTTPAdapter) discoverModel(ctx context.Context) Model {
 			continue
 		}
 
-		capabilities := model.Capabilities
-		if len(capabilities) == 0 {
-			capabilities = fallback.Capabilities
-		}
-
-		return Model{
-			ID:           a.publicModelID,
-			Object:       defaultString(model.Object, "model"),
-			Provider:     a.Name(),
-			Deployment:   "private",
-			Capabilities: capabilities,
-			Status:       defaultString(model.Status, "ready"),
-			Metadata: map[string]any{
-				"discovery":         "upstream",
-				"upstream_model_id": model.ID,
-				"upstream_provider": model.Provider,
-				"upstream_status":   model.Status,
-			},
-		}
+		return a.runtimeModelFromUpstream(a.publicModelID, model)
 	}
 
 	return fallback
+}
+
+func (a *PrivateHTTPAdapter) discoverModels(ctx context.Context) []Model {
+	models, err := a.fetchModels(ctx)
+	if err != nil {
+		return nil
+	}
+
+	discovered := make([]Model, 0, len(models))
+	seen := make(map[string]struct{})
+	for _, model := range models {
+		resolved, ok := a.resolvedModelFromUpstream(model)
+		if !ok {
+			continue
+		}
+		if _, exists := seen[resolved.Model.ID]; exists {
+			continue
+		}
+		seen[resolved.Model.ID] = struct{}{}
+		discovered = append(discovered, resolved.Model)
+	}
+
+	return discovered
+}
+
+func (a *PrivateHTTPAdapter) fallbackSingleModel() Model {
+	return Model{
+		ID:           a.publicModelID,
+		Object:       "model",
+		Provider:     a.Name(),
+		Deployment:   "private",
+		Capabilities: []string{"text"},
+		Status:       "ready",
+		Metadata: map[string]any{
+			"discovery":         "fallback",
+			"upstream_model_id": a.upstreamModelID,
+		},
+	}
 }
 
 func (a *PrivateHTTPAdapter) fetchModels(ctx context.Context) ([]privateHTTPModel, error) {
@@ -225,8 +250,13 @@ func (a *PrivateHTTPAdapter) fetchModels(ctx context.Context) ([]privateHTTPMode
 }
 
 func (a *PrivateHTTPAdapter) Generate(ctx context.Context, request Request) (Response, error) {
+	targetModel, err := a.resolveTargetModel(ctx, request.Model)
+	if err != nil {
+		return Response{}, err
+	}
+
 	payload, err := json.Marshal(privateHTTPRequest{
-		Model:    a.upstreamModelID,
+		Model:    targetModel.UpstreamModelID,
 		Input:    toPrivateHTTPInput(request.Input),
 		Memory:   toPrivateHTTPMemory(request.Memory),
 		Metadata: request.Metadata,
@@ -288,7 +318,7 @@ func (a *PrivateHTTPAdapter) Generate(ctx context.Context, request Request) (Res
 	return Response{
 		ID:     upstream.ID,
 		Object: upstream.Object,
-		Model:  a.publicModelID,
+		Model:  targetModel.Model.ID,
 		Output: toRuntimeOutput(upstream.Output),
 		Usage: Usage{
 			InputTokens:  upstream.Usage.InputTokens,
@@ -299,9 +329,87 @@ func (a *PrivateHTTPAdapter) Generate(ctx context.Context, request Request) (Res
 			Adapter:       a.Name(),
 			Deployment:    "private",
 			MemoryApplied: upstream.Runtime.MemoryApplied,
-			Status:        defaultString(upstream.Runtime.Status, "ready"),
+			Status:        strings.TrimSpace(upstream.Runtime.Status),
 		},
 	}, nil
+}
+
+func (a *PrivateHTTPAdapter) resolveTargetModel(ctx context.Context, publicModelID string) (privateHTTPResolvedModel, error) {
+	target := strings.TrimSpace(publicModelID)
+	if a.singleMapping {
+		if a.publicModelID != target {
+			return privateHTTPResolvedModel{}, modelNotFoundError(publicModelID)
+		}
+		return privateHTTPResolvedModel{
+			Model:           a.fallbackSingleModel(),
+			UpstreamModelID: a.upstreamModelID,
+		}, nil
+	}
+
+	models, err := a.fetchModels(ctx)
+	if err != nil {
+		return privateHTTPResolvedModel{}, toPrivateHTTPDiscoveryError(err)
+	}
+
+	for _, model := range models {
+		resolved, ok := a.resolvedModelFromUpstream(model)
+		if !ok {
+			continue
+		}
+		if resolved.Model.ID == target {
+			return resolved, nil
+		}
+	}
+
+	return privateHTTPResolvedModel{}, modelNotFoundError(publicModelID)
+}
+
+func (a *PrivateHTTPAdapter) resolvedModelFromUpstream(model privateHTTPModel) (privateHTTPResolvedModel, bool) {
+	upstreamModelID := strings.TrimSpace(model.ID)
+	if upstreamModelID == "" {
+		return privateHTTPResolvedModel{}, false
+	}
+
+	publicModelID := publicModelIDForUpstream(upstreamModelID)
+	if publicModelID == "" {
+		return privateHTTPResolvedModel{}, false
+	}
+
+	return privateHTTPResolvedModel{
+		Model:           a.runtimeModelFromUpstream(publicModelID, model),
+		UpstreamModelID: upstreamModelID,
+	}, true
+}
+
+func (a *PrivateHTTPAdapter) runtimeModelFromUpstream(publicModelID string, model privateHTTPModel) Model {
+	capabilities := model.Capabilities
+	if len(capabilities) == 0 {
+		capabilities = []string{"text"}
+	}
+
+	metadata := map[string]any{
+		"discovery":         "upstream",
+		"upstream_model_id": model.ID,
+	}
+	if provider := strings.TrimSpace(model.Provider); provider != "" {
+		metadata["upstream_provider"] = provider
+	}
+	if status := strings.TrimSpace(model.Status); status != "" {
+		metadata["upstream_status"] = status
+	}
+	if deployment := strings.TrimSpace(model.Deployment); deployment != "" {
+		metadata["upstream_deployment"] = deployment
+	}
+
+	return Model{
+		ID:           publicModelID,
+		Object:       defaultString(model.Object, "model"),
+		Provider:     a.Name(),
+		Deployment:   "private",
+		Capabilities: capabilities,
+		Status:       defaultString(model.Status, "ready"),
+		Metadata:     metadata,
+	}
 }
 
 func (a *PrivateHTTPAdapter) applyAuthHeader(request *http.Request) {
@@ -383,4 +491,42 @@ func defaultString(value string, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func publicModelIDForUpstream(upstreamModelID string) string {
+	modelID := strings.TrimSpace(upstreamModelID)
+	modelID = strings.TrimLeft(modelID, "/")
+	if modelID == "" {
+		return ""
+	}
+	if strings.HasPrefix(modelID, privateDiscoveredModelPrefix) {
+		return modelID
+	}
+	if strings.HasPrefix(modelID, "orb/") {
+		return privateDiscoveredModelPrefix + strings.TrimPrefix(modelID, "orb/")
+	}
+	return privateDiscoveredModelPrefix + modelID
+}
+
+func modelNotFoundError(modelID string) error {
+	return &Error{
+		Code:       "not_found",
+		Message:    "model " + `"` + modelID + `"` + " is not available",
+		Details:    map[string]any{"model": modelID},
+		StatusCode: http.StatusNotFound,
+	}
+}
+
+func toPrivateHTTPDiscoveryError(err error) error {
+	var apiErr *Error
+	if errors.As(err, &apiErr) {
+		return apiErr
+	}
+
+	return &Error{
+		Code:       "backend_unavailable",
+		Message:    "private model discovery failed",
+		Details:    map[string]any{"error": err.Error()},
+		StatusCode: http.StatusBadGateway,
+	}
 }

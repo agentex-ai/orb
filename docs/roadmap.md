@@ -41,7 +41,11 @@ first usable Orb runtime.
 
 ## Current Status
 
-Orb is currently in Phase 0.
+Orb is currently between Phase 1 and early Phase 2.
 
-The next meaningful milestone is to lock the first implementation shape rather
-than starting code before the runtime boundary is clear.
+The repository now has a minimal HTTP runtime skeleton, bundled local/private
+adapters, and a private HTTP forwarding path with upstream model discovery.
+
+The next meaningful milestone is to keep tightening the runtime boundary while
+adding the first real provider adapters, memory hooks, and operational
+hardening.

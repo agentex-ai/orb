@@ -9,8 +9,8 @@ The goal of this draft is to define a small, stable surface that can support:
 - optional memory-backed execution,
 - future runtime metadata and policy hooks.
 
-This is still a planning document. Field names and wire contracts may evolve as
-the first implementation is shaped.
+This is still an early draft. Field names and wire contracts may evolve as the
+runtime skeleton grows into a fuller implementation.
 
 ## Design Principles
 
@@ -217,10 +217,10 @@ The following items should be left open until implementation planning:
 
 ## Current Status
 
-Early draft only.
+Early implementation draft.
 
-This API document is meant to narrow the first implementation target, not to
-freeze a final public contract yet.
+This API document is meant to narrow the implementation target, not to freeze a
+final public contract yet.
 
 The current repository implementation serves an early subset of this API with a
 model-routed adapter registry and a bundled local `echo` adapter for the model
@@ -230,8 +230,18 @@ The default runtime also exposes a bundled private-style model,
 `orb/private-example-text`, so the current skeleton already exercises model
 routing across more than one deployment type.
 
-When `ORB_PRIVATE_BASE_URL` is configured, the default private model route is
-served by a `private-http` adapter that forwards Orb-style `/v1/responses`
+When `ORB_PRIVATE_BASE_URL` is configured, the bundled private route is
+replaced by a `private-http` adapter that forwards Orb-style `/v1/responses`
 requests to an upstream private runtime. That adapter can also attach an auth
-header for upstream private deployments, and it can surface upstream discovery
-metadata through `GET /v1/models`.
+header for upstream private deployments.
+
+If only `ORB_PRIVATE_BASE_URL` is set, the adapter uses upstream
+`GET /v1/models` discovery and exposes each discovered private model as
+`orb/private/<upstream-id>`.
+
+If `ORB_PRIVATE_MODEL_ID` or `ORB_PRIVATE_UPSTREAM_MODEL` is also set, the
+adapter falls back to a single explicit forwarded model and preserves the
+earlier one-model mapping behavior.
+
+In both modes, Orb includes discovery metadata for private forwarded models in
+`GET /v1/models`.

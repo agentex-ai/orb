@@ -86,6 +86,71 @@ func TestPrivateHTTPAdapterGenerate(t *testing.T) {
 	}
 }
 
+func TestPrivateHTTPAdapterGenerateUsesDiscoveredModelRoute(t *testing.T) {
+	var gotBody privateHTTPRequest
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/v1/models":
+			writer.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(writer).Encode(privateHTTPModelList{
+				Object: "list",
+				Data: []privateHTTPModel{
+					{
+						ID:           "qwen3-32b",
+						Object:       "model",
+						Provider:     "vllm",
+						Deployment:   "private",
+						Capabilities: []string{"text", "tools"},
+						Status:       "warm",
+					},
+				},
+			})
+		case "/v1/responses":
+			if err := json.NewDecoder(request.Body).Decode(&gotBody); err != nil {
+				t.Fatalf("expected valid upstream body: %v", err)
+			}
+
+			writer.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(writer).Encode(privateHTTPResponse{
+				ID:     "resp_multi",
+				Object: "response",
+				Model:  "qwen3-32b",
+				Output: []privateHTTPResponseItem{{Type: "output_text", Text: "upstream multi ok"}},
+				Runtime: privateHTTPRuntimeMetadata{
+					Status: "warm",
+				},
+			})
+		default:
+			t.Fatalf("unexpected path %s", request.URL.Path)
+		}
+	}))
+	defer upstream.Close()
+
+	adapter, err := NewPrivateHTTPAdapter(PrivateHTTPAdapterConfig{
+		BaseURL: upstream.URL,
+		Client:  upstream.Client(),
+	})
+	if err != nil {
+		t.Fatalf("expected adapter config success, got %v", err)
+	}
+
+	response, err := adapter.Generate(context.Background(), Request{
+		Model: "orb/private/qwen3-32b",
+		Input: []InputMessage{{Role: "user", Content: []InputContent{{Type: "input_text", Text: "hello private"}}}},
+	})
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+
+	if gotBody.Model != "qwen3-32b" {
+		t.Fatalf("expected discovered upstream model id, got %#v", gotBody)
+	}
+
+	if response.Model != "orb/private/qwen3-32b" || response.Runtime.Adapter != "private-http" {
+		t.Fatalf("unexpected routed response payload: %#v", response)
+	}
+}
+
 func TestPrivateHTTPAdapterModelsUsesUpstreamDiscovery(t *testing.T) {
 	var gotAuth string
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -144,6 +209,59 @@ func TestPrivateHTTPAdapterModelsUsesUpstreamDiscovery(t *testing.T) {
 	}
 }
 
+func TestPrivateHTTPAdapterModelsDiscoversMultipleUpstreamModels(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/models" {
+			t.Fatalf("expected /v1/models, got %s", request.URL.Path)
+		}
+
+		writer.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(writer).Encode(privateHTTPModelList{
+			Object: "list",
+			Data: []privateHTTPModel{
+				{
+					ID:           "qwen3-32b",
+					Object:       "model",
+					Provider:     "vllm",
+					Deployment:   "private",
+					Capabilities: []string{"text"},
+					Status:       "warm",
+				},
+				{
+					ID:           "orb/custom-tools",
+					Object:       "model",
+					Provider:     "sglang",
+					Deployment:   "private",
+					Capabilities: []string{"text", "tools"},
+					Status:       "ready",
+				},
+			},
+		})
+	}))
+	defer upstream.Close()
+
+	adapter, err := NewPrivateHTTPAdapter(PrivateHTTPAdapterConfig{
+		BaseURL: upstream.URL,
+		Client:  upstream.Client(),
+	})
+	if err != nil {
+		t.Fatalf("expected adapter config success, got %v", err)
+	}
+
+	models := adapter.Models(context.Background())
+	if len(models) != 2 {
+		t.Fatalf("expected two discovered models, got %#v", models)
+	}
+
+	if models[0].ID != "orb/private/qwen3-32b" || models[0].Metadata["upstream_model_id"] != "qwen3-32b" {
+		t.Fatalf("unexpected first discovered model: %#v", models[0])
+	}
+
+	if models[1].ID != "orb/private/custom-tools" || models[1].Metadata["upstream_provider"] != "sglang" {
+		t.Fatalf("unexpected second discovered model: %#v", models[1])
+	}
+}
+
 func TestPrivateHTTPAdapterModelsFallsBackWhenDiscoveryFails(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		http.Error(writer, `{"error":{"code":"backend_unavailable","message":"no models"}}`, http.StatusBadGateway)
@@ -168,6 +286,26 @@ func TestPrivateHTTPAdapterModelsFallsBackWhenDiscoveryFails(t *testing.T) {
 	model := models[0]
 	if model.Metadata["discovery"] != "fallback" || model.Metadata["upstream_model_id"] != "upstream-private" {
 		t.Fatalf("unexpected fallback metadata: %#v", model.Metadata)
+	}
+}
+
+func TestPrivateHTTPAdapterModelsReturnsNoModelsWhenAutoDiscoveryFails(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		http.Error(writer, `{"error":{"code":"backend_unavailable","message":"no models"}}`, http.StatusBadGateway)
+	}))
+	defer upstream.Close()
+
+	adapter, err := NewPrivateHTTPAdapter(PrivateHTTPAdapterConfig{
+		BaseURL: upstream.URL,
+		Client:  upstream.Client(),
+	})
+	if err != nil {
+		t.Fatalf("expected adapter config success, got %v", err)
+	}
+
+	models := adapter.Models(context.Background())
+	if len(models) != 0 {
+		t.Fatalf("expected no auto-discovered models on discovery failure, got %#v", models)
 	}
 }
 
@@ -213,7 +351,45 @@ func TestPrivateHTTPAdapterGenerateWithCustomAuthHeader(t *testing.T) {
 	}
 }
 
-func TestConfiguredRegistryUsesPrivateHTTPAdapter(t *testing.T) {
+func TestPrivateHTTPAdapterGenerateReturnsNotFoundForUnknownDiscoveredModel(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/models" {
+			t.Fatalf("expected /v1/models, got %s", request.URL.Path)
+		}
+
+		writer.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(writer).Encode(privateHTTPModelList{
+			Object: "list",
+			Data: []privateHTTPModel{
+				{ID: "qwen3-32b", Object: "model", Provider: "vllm", Deployment: "private", Status: "ready"},
+			},
+		})
+	}))
+	defer upstream.Close()
+
+	adapter, err := NewPrivateHTTPAdapter(PrivateHTTPAdapterConfig{
+		BaseURL: upstream.URL,
+		Client:  upstream.Client(),
+	})
+	if err != nil {
+		t.Fatalf("expected adapter config success, got %v", err)
+	}
+
+	_, err = adapter.Generate(context.Background(), Request{
+		Model: "orb/private/unknown",
+		Input: []InputMessage{{Role: "user", Content: []InputContent{{Type: "input_text", Text: "hello"}}}},
+	})
+	if err == nil {
+		t.Fatal("expected not found error")
+	}
+
+	apiErr, ok := err.(*Error)
+	if !ok || apiErr.Code != "not_found" {
+		t.Fatalf("unexpected error: %#v", err)
+	}
+}
+
+func TestConfiguredRegistryUsesPrivateHTTPAdapterSingleModelOverride(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		http.Error(writer, "unused", http.StatusNotImplemented)
 	}))
@@ -221,6 +397,7 @@ func TestConfiguredRegistryUsesPrivateHTTPAdapter(t *testing.T) {
 
 	registry := ConfiguredRegistry(RegistryConfig{
 		PrivateBaseURL: upstream.URL,
+		PrivateModelID: privateEchoModelID,
 		HTTPClient:     upstream.Client(),
 	})
 	models := registry.Models(context.Background())
@@ -235,5 +412,37 @@ func TestConfiguredRegistryUsesPrivateHTTPAdapter(t *testing.T) {
 
 	if models[1].Metadata["discovery"] != "fallback" {
 		t.Fatalf("expected fallback metadata, got %#v", models[1].Metadata)
+	}
+}
+
+func TestConfiguredRegistryUsesPrivateHTTPAdapterDiscoveredModels(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/models" {
+			t.Fatalf("expected /v1/models, got %s", request.URL.Path)
+		}
+
+		writer.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(writer).Encode(privateHTTPModelList{
+			Object: "list",
+			Data: []privateHTTPModel{
+				{ID: "qwen3-32b", Object: "model", Provider: "vllm", Deployment: "private", Status: "warm"},
+				{ID: "llama3-70b", Object: "model", Provider: "vllm", Deployment: "private", Status: "ready"},
+			},
+		})
+	}))
+	defer upstream.Close()
+
+	registry := ConfiguredRegistry(RegistryConfig{
+		PrivateBaseURL: upstream.URL,
+		HTTPClient:     upstream.Client(),
+	})
+	models := registry.Models(context.Background())
+
+	if len(models) != 3 {
+		t.Fatalf("expected 3 models, got %#v", models)
+	}
+
+	if models[1].ID != "orb/private/qwen3-32b" || models[2].ID != "orb/private/llama3-70b" {
+		t.Fatalf("unexpected discovered registry models: %#v", models)
 	}
 }

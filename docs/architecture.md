@@ -81,8 +81,12 @@ The first implementation should avoid overcommitting to:
 
 ## Current Status
 
-Early planning / pre-implementation.
+Early implementation skeleton.
 
-Implementation details such as language choice, storage backends, API schema,
-deployment model, and adapter contracts remain open and should be decided in
-follow-up design work.
+The repository now includes a minimal Go HTTP service, a model-routed adapter
+registry, bundled local and private echo adapters, and an upstream private HTTP
+adapter with model discovery.
+
+Implementation details such as storage backends, memory architecture,
+deployment model, and broader runtime contracts remain open and should keep
+evolving in follow-up design work.

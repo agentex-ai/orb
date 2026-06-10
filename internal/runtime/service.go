@@ -99,9 +99,7 @@ func NewService(registry *Registry) *Service {
 
 func (s *Service) Models(ctx context.Context) []Model {
 	models := s.registry.Models(ctx)
-	cloned := make([]Model, len(models))
-	copy(cloned, models)
-	return cloned
+	return cloneModels(models)
 }
 
 func (s *Service) CreateResponse(ctx context.Context, request Request) (Response, error) {
@@ -229,4 +227,44 @@ func newResponseID() string {
 	}
 
 	return "resp_" + hex.EncodeToString(randomBytes)
+}
+
+func cloneModels(models []Model) []Model {
+	if len(models) == 0 {
+		return nil
+	}
+
+	cloned := make([]Model, 0, len(models))
+	for _, model := range models {
+		next := model
+		if len(model.Capabilities) > 0 {
+			next.Capabilities = append([]string(nil), model.Capabilities...)
+		}
+		if len(model.Metadata) > 0 {
+			next.Metadata = cloneMetadata(model.Metadata)
+		}
+		cloned = append(cloned, next)
+	}
+
+	return cloned
+}
+
+func cloneMetadata(metadata map[string]any) map[string]any {
+	if len(metadata) == 0 {
+		return nil
+	}
+
+	cloned := make(map[string]any, len(metadata))
+	for key, value := range metadata {
+		switch typed := value.(type) {
+		case []string:
+			cloned[key] = append([]string(nil), typed...)
+		case map[string]any:
+			cloned[key] = cloneMetadata(typed)
+		default:
+			cloned[key] = typed
+		}
+	}
+
+	return cloned
 }

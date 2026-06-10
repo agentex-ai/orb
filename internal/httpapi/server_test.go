@@ -199,3 +199,134 @@ func TestModelsIncludesPrivateHTTPDiscoveryMetadata(t *testing.T) {
 		t.Fatalf("expected upstream discovery metadata, got %#v", privateModel.Metadata)
 	}
 }
+
+func TestModelsIncludesMultipleDiscoveredPrivateModels(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/models" {
+			t.Fatalf("expected /v1/models, got %s", request.URL.Path)
+		}
+
+		writer.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(writer).Encode(map[string]any{
+			"object": "list",
+			"data": []map[string]any{
+				{
+					"id":           "qwen3-32b",
+					"object":       "model",
+					"provider":     "vllm",
+					"deployment":   "private",
+					"capabilities": []string{"text"},
+					"status":       "warm",
+				},
+				{
+					"id":           "llama3-70b",
+					"object":       "model",
+					"provider":     "sglang",
+					"deployment":   "private",
+					"capabilities": []string{"text", "tools"},
+					"status":       "ready",
+				},
+			},
+		})
+	}))
+	defer upstream.Close()
+
+	service := orb.NewService(orb.ConfiguredRegistry(orb.RegistryConfig{
+		PrivateBaseURL: upstream.URL,
+		HTTPClient:     upstream.Client(),
+	}))
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	recorder := httptest.NewRecorder()
+
+	NewServerWithService(service).ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", recorder.Code)
+	}
+
+	var response ModelList
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("expected valid JSON response: %v", err)
+	}
+
+	if len(response.Data) != 3 {
+		t.Fatalf("expected 3 models, got %#v", response.Data)
+	}
+
+	if response.Data[1].ID != "orb/private/qwen3-32b" || response.Data[2].ID != "orb/private/llama3-70b" {
+		t.Fatalf("unexpected discovered model ids: %#v", response.Data)
+	}
+}
+
+func TestResponsesRoutesToDiscoveredPrivateHTTPModel(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/v1/models":
+			writer.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(writer).Encode(map[string]any{
+				"object": "list",
+				"data": []map[string]any{
+					{
+						"id":           "qwen3-32b",
+						"object":       "model",
+						"provider":     "vllm",
+						"deployment":   "private",
+						"capabilities": []string{"text", "tools"},
+						"status":       "warm",
+					},
+				},
+			})
+		case "/v1/responses":
+			writer.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(writer).Encode(map[string]any{
+				"id":     "resp_private",
+				"object": "response",
+				"model":  "qwen3-32b",
+				"output": []map[string]any{
+					{
+						"type": "output_text",
+						"text": "private runtime ok",
+					},
+				},
+				"runtime": map[string]any{
+					"status": "warm",
+				},
+			})
+		default:
+			t.Fatalf("unexpected path %s", request.URL.Path)
+		}
+	}))
+	defer upstream.Close()
+
+	service := orb.NewService(orb.ConfiguredRegistry(orb.RegistryConfig{
+		PrivateBaseURL: upstream.URL,
+		HTTPClient:     upstream.Client(),
+	}))
+
+	body := []byte(`{
+		"model":"orb/private/qwen3-32b",
+		"input":[{"role":"user","content":[{"type":"input_text","text":"hello private orb"}]}]
+	}`)
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	recorder := httptest.NewRecorder()
+
+	NewServerWithService(service).ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", recorder.Code)
+	}
+
+	var response ResponseEnvelope
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("expected valid JSON response: %v", err)
+	}
+
+	if response.Model != "orb/private/qwen3-32b" || response.Runtime.Adapter != "private-http" {
+		t.Fatalf("unexpected discovered private response payload: %#v", response)
+	}
+
+	if len(response.Output) != 1 || response.Output[0].Text != "private runtime ok" {
+		t.Fatalf("unexpected discovered private output payload: %#v", response.Output)
+	}
+}
