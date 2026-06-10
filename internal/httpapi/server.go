@@ -1,9 +1,12 @@
 package httpapi
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 
 	orb "github.com/agentex-ai/orb/internal/runtime"
 )
@@ -27,6 +30,7 @@ type ResponseRequest struct {
 	Model    string                 `json:"model"`
 	Input    []InputMessage         `json:"input"`
 	Memory   *MemoryRequest         `json:"memory,omitempty"`
+	Stream   bool                   `json:"stream,omitempty"`
 	Metadata map[string]any         `json:"metadata,omitempty"`
 	Settings map[string]interface{} `json:"settings,omitempty"`
 }
@@ -136,13 +140,41 @@ func (s server) handleResponses(writer http.ResponseWriter, request *http.Reques
 		return
 	}
 
-	response, err := s.service.CreateResponse(request.Context(), orb.Request{
+	runtimeRequest := orb.Request{
 		Model:    payload.Model,
 		Input:    toRuntimeInput(payload.Input),
 		Memory:   toRuntimeMemory(payload.Memory),
+		Stream:   payload.Stream,
 		Metadata: payload.Metadata,
 		Settings: payload.Settings,
-	})
+	}
+
+	if payload.Stream {
+		flusher, ok := writer.(http.Flusher)
+		if !ok {
+			writeError(writer, http.StatusInternalServerError, APIError{
+				Code:    "internal_error",
+				Message: "streaming is not supported by this server",
+			})
+			return
+		}
+
+		writeSSEHeaders(writer)
+		err := s.service.StreamResponse(request.Context(), runtimeRequest, func(event orb.StreamEvent) error {
+			if err := writeSSEEvent(writer, event); err != nil {
+				return err
+			}
+			flusher.Flush()
+			return nil
+		})
+		if err != nil {
+			writeStreamError(writer, err)
+			flusher.Flush()
+		}
+		return
+	}
+
+	response, err := s.service.CreateResponse(request.Context(), runtimeRequest)
 	if err != nil {
 		writeServiceError(writer, err)
 		return
@@ -163,6 +195,52 @@ func (s server) handleResponses(writer http.ResponseWriter, request *http.Reques
 			Deployment:    response.Runtime.Deployment,
 			MemoryApplied: response.Runtime.MemoryApplied,
 			Status:        response.Runtime.Status,
+		},
+	})
+}
+
+func writeSSEHeaders(writer http.ResponseWriter) {
+	headers := writer.Header()
+	headers.Set("Content-Type", "text/event-stream")
+	headers.Set("Cache-Control", "no-cache")
+	headers.Set("Connection", "keep-alive")
+}
+
+func writeSSEEvent(writer http.ResponseWriter, event orb.StreamEvent) error {
+	payload, err := json.Marshal(event.Data)
+	if err != nil {
+		return err
+	}
+
+	buffer := bufio.NewWriter(writer)
+	if _, err := fmt.Fprintf(buffer, "event: %s\n", strings.TrimSpace(event.Type)); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(buffer, "data: %s\n\n", payload); err != nil {
+		return err
+	}
+	return buffer.Flush()
+}
+
+func writeStreamError(writer http.ResponseWriter, err error) {
+	var apiErr *orb.Error
+	if errors.As(err, &apiErr) {
+		_ = writeSSEEvent(writer, orb.StreamEvent{
+			Type: "error",
+			Data: APIError{
+				Code:    apiErr.Code,
+				Message: apiErr.Message,
+				Details: apiErr.Details,
+			},
+		})
+		return
+	}
+
+	_ = writeSSEEvent(writer, orb.StreamEvent{
+		Type: "error",
+		Data: APIError{
+			Code:    "internal_error",
+			Message: "unexpected runtime error",
 		},
 	})
 }

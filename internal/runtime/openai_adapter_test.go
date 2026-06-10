@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -168,6 +169,86 @@ func TestOpenAIAdapterGenerateMapsProviderErrors(t *testing.T) {
 
 	if apiErr.Details["provider_type"] != "invalid_request_error" || apiErr.Details["provider_param"] != "input" {
 		t.Fatalf("unexpected error details: %#v", apiErr.Details)
+	}
+}
+
+func TestOpenAIAdapterGenerateStream(t *testing.T) {
+	var gotAccept string
+	var gotBody map[string]any
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/responses" {
+			t.Fatalf("expected /v1/responses, got %s", request.URL.Path)
+		}
+
+		gotAccept = request.Header.Get("Accept")
+		if err := json.NewDecoder(request.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("expected valid upstream body: %v", err)
+		}
+
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = writer.Write([]byte(strings.Join([]string{
+			"event: response.created",
+			`data: {"type":"response.created","response":{"id":"resp_stream"}}`,
+			"",
+			"event: response.output_text.delta",
+			`data: {"type":"response.output_text.delta","delta":"Hello"}`,
+			"",
+			"event: response.output_text.delta",
+			`data: {"type":"response.output_text.delta","delta":" world"}`,
+			"",
+			"event: response.completed",
+			`data: {"type":"response.completed","response":{"id":"resp_stream","status":"completed"}}`,
+			"",
+		}, "\n")))
+	}))
+	defer upstream.Close()
+
+	adapter, err := NewOpenAIAdapter(OpenAIAdapterConfig{
+		BaseURL: upstream.URL + "/v1",
+		APIKey:  "test-key",
+		ModelID: "gpt-5-mini",
+		Client:  upstream.Client(),
+	})
+	if err != nil {
+		t.Fatalf("expected adapter config success, got %v", err)
+	}
+
+	events := make([]StreamEvent, 0)
+	err = adapter.GenerateStream(context.Background(), Request{
+		Model:  "orb/openai/gpt-5-mini",
+		Stream: true,
+		Input:  []InputMessage{{Role: "user", Content: []InputContent{{Type: "input_text", Text: "hello"}}}},
+		Settings: map[string]any{
+			"stream":      false,
+			"temperature": 0.3,
+		},
+	}, func(event StreamEvent) error {
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("expected stream success, got %v", err)
+	}
+
+	if gotAccept != "text/event-stream" {
+		t.Fatalf("expected SSE accept header, got %q", gotAccept)
+	}
+
+	if gotBody["stream"] != true {
+		t.Fatalf("expected top-level stream flag, got %#v", gotBody)
+	}
+
+	if gotBody["temperature"] != 0.3 {
+		t.Fatalf("expected forwarded settings, got %#v", gotBody)
+	}
+
+	if len(events) != 4 {
+		t.Fatalf("expected 4 stream events, got %#v", events)
+	}
+
+	if events[0].Type != "response.created" || events[1].Type != "response.output_text.delta" || events[3].Type != "response.completed" {
+		t.Fatalf("unexpected stream events: %#v", events)
 	}
 }
 

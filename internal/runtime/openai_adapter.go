@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -256,12 +258,81 @@ func toOpenAIInput(messages []InputMessage) []openAIRequestInputItem {
 func mergeOpenAISettings(payload map[string]any, settings map[string]any) {
 	for key, value := range settings {
 		switch key {
-		case "", "model", "input", "metadata":
+		case "", "model", "input", "metadata", "stream":
 			continue
 		default:
 			payload[key] = value
 		}
 	}
+}
+
+func (a *OpenAIAdapter) GenerateStream(ctx context.Context, request Request, emit func(StreamEvent) error) error {
+	if strings.TrimSpace(request.Model) != a.publicModelID {
+		return modelNotFoundError(request.Model)
+	}
+	if emit == nil {
+		return &Error{
+			Code:       "internal_error",
+			Message:    "stream emitter is required",
+			StatusCode: http.StatusInternalServerError,
+		}
+	}
+
+	payload := map[string]any{
+		"model":  a.modelID,
+		"input":  toOpenAIInput(request.Input),
+		"stream": true,
+	}
+	if metadata := toOpenAIMetadata(request.Metadata); len(metadata) > 0 {
+		payload["metadata"] = metadata
+	}
+	mergeOpenAISettings(payload, request.Settings)
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return &Error{
+			Code:       "internal_error",
+			Message:    "failed to encode openai adapter request",
+			StatusCode: http.StatusInternalServerError,
+		}
+	}
+
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+"/responses", bytes.NewReader(body))
+	if err != nil {
+		return &Error{
+			Code:       "backend_unavailable",
+			Message:    "failed to create openai adapter request",
+			StatusCode: http.StatusBadGateway,
+		}
+	}
+	httpRequest.Header.Set("Authorization", "Bearer "+a.apiKey)
+	httpRequest.Header.Set("Content-Type", "application/json")
+	httpRequest.Header.Set("Accept", "text/event-stream")
+
+	httpResponse, err := a.client.Do(httpRequest)
+	if err != nil {
+		return &Error{
+			Code:       "backend_unavailable",
+			Message:    "openai adapter request failed",
+			Details:    map[string]any{"error": err.Error()},
+			StatusCode: http.StatusBadGateway,
+		}
+	}
+	defer httpResponse.Body.Close()
+
+	if httpResponse.StatusCode >= http.StatusBadRequest {
+		responseBody, readErr := io.ReadAll(httpResponse.Body)
+		if readErr != nil {
+			return &Error{
+				Code:       "backend_unavailable",
+				Message:    "failed to read openai adapter response",
+				StatusCode: http.StatusBadGateway,
+			}
+		}
+		return toOpenAIError(httpResponse.StatusCode, responseBody)
+	}
+
+	return streamOpenAIEvents(httpResponse.Body, emit)
 }
 
 func toRuntimeOutputFromOpenAI(items []openAIOutputItem) []OutputItem {
@@ -353,6 +424,81 @@ func toOpenAIError(statusCode int, body []byte) error {
 		Details:    map[string]any{"status_code": statusCode},
 		StatusCode: statusCode,
 	}
+}
+
+func streamOpenAIEvents(body io.Reader, emit func(StreamEvent) error) error {
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	var eventType string
+	var dataLines []string
+
+	flushEvent := func() error {
+		if strings.TrimSpace(eventType) == "" && len(dataLines) == 0 {
+			return nil
+		}
+
+		data := strings.Join(dataLines, "\n")
+		eventType = strings.TrimSpace(eventType)
+		if eventType == "" {
+			eventType = "message"
+		}
+
+		data = strings.TrimSpace(data)
+		if data == "" {
+			data = "{}"
+		}
+		if data == "[DONE]" {
+			eventType = "done"
+			data = `{}`
+		}
+
+		raw := json.RawMessage(data)
+		if !json.Valid(raw) {
+			raw = json.RawMessage(`{"raw":` + strconv.Quote(data) + `}`)
+		}
+
+		if err := emit(StreamEvent{
+			Type: eventType,
+			Data: raw,
+		}); err != nil {
+			return err
+		}
+
+		eventType = ""
+		dataLines = nil
+		return nil
+	}
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			if err := flushEvent(); err != nil {
+				return err
+			}
+			continue
+		}
+		if strings.HasPrefix(line, ":") {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(line, "event:"):
+			eventType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+		case strings.HasPrefix(line, "data:"):
+			dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return &Error{
+			Code:       "backend_unavailable",
+			Message:    "failed to read openai streaming response",
+			Details:    map[string]any{"error": err.Error()},
+			StatusCode: http.StatusBadGateway,
+		}
+	}
+
+	return flushEvent()
 }
 
 func openAIErrorCodeForStatus(statusCode int) string {

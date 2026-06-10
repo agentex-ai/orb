@@ -135,6 +135,18 @@ Example response:
 }
 ```
 
+Current implementation note:
+
+- Orb accepts a top-level `stream: true` field on `POST /v1/responses`.
+- Hosted OpenAI-backed models currently return server-sent events with
+  `Content-Type: text/event-stream`.
+- Orb currently passes through OpenAI typed event names such as
+  `response.created`, `response.output_text.delta`, `response.completed`, and
+  `error`.
+- Streaming is adapter-specific for now. If a client requests streaming for a
+  model that does not support it, Orb currently returns an SSE `error` event
+  rather than switching to a JSON error body mid-stream.
+
 `GET /v1/responses/{response_id}` should provide a retrieval path for runtimes
 that persist response metadata or support asynchronous workflows later.
 
@@ -209,7 +221,7 @@ Early error codes should cover:
 The following items should be left open until implementation planning:
 
 - authentication mechanism,
-- streaming response format,
+- cross-provider streaming normalization,
 - exact tool-calling contract,
 - persistence guarantees for response retrieval,
 - memory backend schema,
@@ -230,6 +242,10 @@ When `ORB_OPENAI_API_KEY` and `ORB_OPENAI_MODEL_ID` are configured, the runtime
 also exposes a hosted OpenAI-backed model as `orb/openai/<model-id>` by
 default. That path currently forwards Orb-style `/v1/responses` calls to the
 OpenAI Responses API.
+
+That hosted OpenAI path also supports a top-level `stream: true` field on
+`POST /v1/responses`. The current implementation returns server-sent events and
+passes through OpenAI event names and JSON event payloads.
 
 The default runtime also exposes a bundled private-style model,
 `orb/private-example-text`, so the current skeleton already exercises model

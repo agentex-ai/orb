@@ -18,6 +18,10 @@ type Adapter interface {
 	Generate(context.Context, Request) (Response, error)
 }
 
+type StreamingAdapter interface {
+	GenerateStream(context.Context, Request, func(StreamEvent) error) error
+}
+
 type Model struct {
 	ID           string
 	Object       string
@@ -32,6 +36,7 @@ type Request struct {
 	Model    string
 	Input    []InputMessage
 	Memory   *MemoryRequest
+	Stream   bool
 	Metadata map[string]any
 	Settings map[string]any
 }
@@ -76,6 +81,11 @@ type Runtime struct {
 	Deployment    string
 	MemoryApplied bool
 	Status        string
+}
+
+type StreamEvent struct {
+	Type string
+	Data any
 }
 
 type Error struct {
@@ -138,6 +148,29 @@ func (s *Service) CreateResponse(ctx context.Context, request Request) (Response
 	}
 
 	return response, nil
+}
+
+func (s *Service) StreamResponse(ctx context.Context, request Request, emit func(StreamEvent) error) error {
+	if err := validateRequest(request); err != nil {
+		return err
+	}
+
+	adapter, _, err := s.registry.AdapterForModel(ctx, request.Model)
+	if err != nil {
+		return err
+	}
+
+	streamingAdapter, ok := adapter.(StreamingAdapter)
+	if !ok {
+		return &Error{
+			Code:       "invalid_argument",
+			Message:    "streaming is not supported for model " + `"` + request.Model + `"`,
+			Details:    map[string]any{"model": request.Model},
+			StatusCode: http.StatusBadRequest,
+		}
+	}
+
+	return normalizeError(streamingAdapter.GenerateStream(ctx, request, emit))
 }
 
 func validateRequest(request Request) error {

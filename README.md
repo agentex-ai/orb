@@ -81,6 +81,11 @@ When `ORB_OPENAI_API_KEY` and `ORB_OPENAI_MODEL_ID` are configured, Orb also
 exposes a hosted OpenAI-backed model. By default, that model is visible as
 `orb/openai/<model-id>` and is executed through OpenAI's Responses API.
 
+That hosted path also supports streaming through `POST /v1/responses` with a
+top-level `"stream": true` field. Orb returns server-sent events and currently
+passes through OpenAI's typed event names such as `response.created`,
+`response.output_text.delta`, `response.completed`, and `error`.
+
 When `ORB_PRIVATE_BASE_URL` is configured, the bundled private route is replaced
 by a `private-http` adapter that forwards `POST /v1/responses` calls to the
 upstream runtime. Optional auth headers can be attached through

@@ -238,6 +238,90 @@ func TestResponsesRoutesToOpenAIAdapter(t *testing.T) {
 	}
 }
 
+func TestResponsesStreamsOpenAIAdapterEvents(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/responses" {
+			t.Fatalf("expected /v1/responses, got %s", request.URL.Path)
+		}
+
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = writer.Write([]byte(strings.Join([]string{
+			"event: response.created",
+			`data: {"type":"response.created","response":{"id":"resp_stream"}}`,
+			"",
+			"event: response.output_text.delta",
+			`data: {"type":"response.output_text.delta","delta":"hello"}`,
+			"",
+			"event: response.completed",
+			`data: {"type":"response.completed","response":{"id":"resp_stream","status":"completed"}}`,
+			"",
+		}, "\n")))
+	}))
+	defer upstream.Close()
+
+	service := orb.NewService(orb.ConfiguredRegistry(orb.RegistryConfig{
+		OpenAIBaseURL: upstream.URL + "/v1",
+		OpenAIAPIKey:  "test-key",
+		OpenAIModelID: "gpt-5-mini",
+		HTTPClient:    upstream.Client(),
+	}))
+
+	body := []byte(`{
+		"model":"orb/openai/gpt-5-mini",
+		"stream":true,
+		"input":[{"role":"user","content":[{"type":"input_text","text":"hello hosted orb"}]}]
+	}`)
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	recorder := httptest.NewRecorder()
+
+	NewServerWithService(service).ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", recorder.Code)
+	}
+
+	if contentType := recorder.Header().Get("Content-Type"); contentType != "text/event-stream" {
+		t.Fatalf("expected sse content type, got %q", contentType)
+	}
+
+	responseBody := recorder.Body.String()
+	if !strings.Contains(responseBody, "event: response.created") {
+		t.Fatalf("expected response.created event, got %s", responseBody)
+	}
+
+	if !strings.Contains(responseBody, "event: response.output_text.delta") {
+		t.Fatalf("expected response.output_text.delta event, got %s", responseBody)
+	}
+
+	if !strings.Contains(responseBody, `"delta":"hello"`) {
+		t.Fatalf("expected delta payload, got %s", responseBody)
+	}
+}
+
+func TestResponsesStreamingReturnsSSEErrorForUnsupportedModel(t *testing.T) {
+	body := []byte(`{
+		"model":"orb/example-text",
+		"stream":true,
+		"input":[{"role":"user","content":[{"type":"input_text","text":"hello orb"}]}]
+	}`)
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	recorder := httptest.NewRecorder()
+
+	NewServer().ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", recorder.Code)
+	}
+
+	if contentType := recorder.Header().Get("Content-Type"); contentType != "text/event-stream" {
+		t.Fatalf("expected sse content type, got %q", contentType)
+	}
+
+	if !strings.Contains(recorder.Body.String(), "event: error") || !strings.Contains(recorder.Body.String(), `"streaming is not supported`) {
+		t.Fatalf("expected streaming error event, got %s", recorder.Body.String())
+	}
+}
+
 func TestModelsIncludesPrivateHTTPDiscoveryMetadata(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/v1/models" {
