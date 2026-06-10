@@ -71,6 +71,36 @@ Example response:
 }
 ```
 
+Current implementation example with the default registry:
+
+```bash
+curl http://localhost:8080/v1/models
+```
+
+```json
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "orb/example-text",
+      "object": "model",
+      "provider": "echo",
+      "deployment": "local",
+      "capabilities": ["text"],
+      "status": "ready"
+    },
+    {
+      "id": "orb/private-example-text",
+      "object": "model",
+      "provider": "private-echo",
+      "deployment": "private",
+      "capabilities": ["text"],
+      "status": "ready"
+    }
+  ]
+}
+```
+
 ### Responses
 
 `POST /v1/responses` should be the primary execution endpoint.
@@ -135,6 +165,56 @@ Example response:
 }
 ```
 
+Current implementation example with the bundled local model:
+
+```bash
+curl http://localhost:8080/v1/responses \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "orb/example-text",
+    "input": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "hello orb"
+          }
+        ]
+      }
+    ],
+    "memory": {
+      "enabled": true,
+      "scope": "workspace:test"
+    }
+  }'
+```
+
+```json
+{
+  "id": "resp_example",
+  "object": "response",
+  "model": "orb/example-text",
+  "output": [
+    {
+      "type": "output_text",
+      "text": "Echo: hello orb"
+    }
+  ],
+  "usage": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "total_tokens": 0
+  },
+  "runtime": {
+    "adapter": "echo",
+    "deployment": "local",
+    "memory_applied": true,
+    "status": "ready"
+  }
+}
+```
+
 Current implementation note:
 
 - Orb accepts a top-level `stream: true` field on `POST /v1/responses`.
@@ -146,6 +226,42 @@ Current implementation note:
 - Streaming is adapter-specific for now. If a client requests streaming for a
   model that does not support it, Orb currently returns an SSE `error` event
   rather than switching to a JSON error body mid-stream.
+
+Current streaming example after setting `ORB_OPENAI_API_KEY` and
+`ORB_OPENAI_MODEL_ID=gpt-5-mini`:
+
+```bash
+curl -N http://localhost:8080/v1/responses \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "orb/openai/gpt-5-mini",
+    "stream": true,
+    "input": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Write one short line about Agentex Orb."
+          }
+        ]
+      }
+    ]
+  }'
+```
+
+Representative streamed event sequence:
+
+```text
+event: response.created
+data: {"type":"response.created","response":{"id":"resp_stream"}}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","delta":"hello"}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_stream","status":"completed"}}
+```
 
 `GET /v1/responses/{response_id}` should provide a retrieval path for runtimes
 that persist response metadata or support asynchronous workflows later.
