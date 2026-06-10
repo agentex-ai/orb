@@ -42,6 +42,7 @@ type privateHTTPRequest struct {
 	Model    string                    `json:"model"`
 	Input    []privateHTTPInputMessage `json:"input"`
 	Memory   *privateHTTPMemory        `json:"memory,omitempty"`
+	Stream   bool                      `json:"stream,omitempty"`
 	Metadata map[string]any            `json:"metadata,omitempty"`
 	Settings map[string]any            `json:"settings,omitempty"`
 }
@@ -332,6 +333,73 @@ func (a *PrivateHTTPAdapter) Generate(ctx context.Context, request Request) (Res
 			Status:        strings.TrimSpace(upstream.Runtime.Status),
 		},
 	}, nil
+}
+
+func (a *PrivateHTTPAdapter) GenerateStream(ctx context.Context, request Request, emit func(StreamEvent) error) error {
+	targetModel, err := a.resolveTargetModel(ctx, request.Model)
+	if err != nil {
+		return err
+	}
+	if emit == nil {
+		return &Error{
+			Code:       "internal_error",
+			Message:    "stream emitter is required",
+			StatusCode: http.StatusInternalServerError,
+		}
+	}
+
+	payload, err := json.Marshal(privateHTTPRequest{
+		Model:    targetModel.UpstreamModelID,
+		Input:    toPrivateHTTPInput(request.Input),
+		Memory:   toPrivateHTTPMemory(request.Memory),
+		Stream:   true,
+		Metadata: request.Metadata,
+		Settings: request.Settings,
+	})
+	if err != nil {
+		return &Error{
+			Code:       "internal_error",
+			Message:    "failed to encode private adapter request",
+			StatusCode: http.StatusInternalServerError,
+		}
+	}
+
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+"/v1/responses", bytes.NewReader(payload))
+	if err != nil {
+		return &Error{
+			Code:       "backend_unavailable",
+			Message:    "failed to create private adapter request",
+			StatusCode: http.StatusBadGateway,
+		}
+	}
+	httpRequest.Header.Set("Content-Type", "application/json")
+	httpRequest.Header.Set("Accept", "text/event-stream")
+	a.applyAuthHeader(httpRequest)
+
+	httpResponse, err := a.client.Do(httpRequest)
+	if err != nil {
+		return &Error{
+			Code:       "backend_unavailable",
+			Message:    "private adapter request failed",
+			Details:    map[string]any{"error": err.Error()},
+			StatusCode: http.StatusBadGateway,
+		}
+	}
+	defer httpResponse.Body.Close()
+
+	if httpResponse.StatusCode >= http.StatusBadRequest {
+		body, readErr := io.ReadAll(httpResponse.Body)
+		if readErr != nil {
+			return &Error{
+				Code:       "backend_unavailable",
+				Message:    "failed to read private adapter response",
+				StatusCode: http.StatusBadGateway,
+			}
+		}
+		return toPrivateHTTPError(httpResponse.StatusCode, body)
+	}
+
+	return streamSSEEvents(httpResponse.Body, "failed to read private streaming response", emit)
 }
 
 func (a *PrivateHTTPAdapter) resolveTargetModel(ctx context.Context, publicModelID string) (privateHTTPResolvedModel, error) {

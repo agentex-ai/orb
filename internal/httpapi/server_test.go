@@ -322,6 +322,76 @@ func TestResponsesStreamingReturnsSSEErrorForUnsupportedModel(t *testing.T) {
 	}
 }
 
+func TestResponsesStreamsPrivateHTTPAdapterEvents(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/v1/models":
+			writer.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(writer).Encode(map[string]any{
+				"object": "list",
+				"data": []map[string]any{
+					{
+						"id":           "qwen3-32b",
+						"object":       "model",
+						"provider":     "vllm",
+						"deployment":   "private",
+						"capabilities": []string{"text"},
+						"status":       "warm",
+					},
+				},
+			})
+		case "/v1/responses":
+			writer.Header().Set("Content-Type", "text/event-stream")
+			_, _ = writer.Write([]byte(strings.Join([]string{
+				"event: response.created",
+				`data: {"type":"response.created","response":{"id":"resp_private_stream"}}`,
+				"",
+				"event: response.output_text.delta",
+				`data: {"type":"response.output_text.delta","delta":"private hello"}`,
+				"",
+				"event: response.completed",
+				`data: {"type":"response.completed","response":{"id":"resp_private_stream","status":"completed"}}`,
+				"",
+			}, "\n")))
+		default:
+			t.Fatalf("unexpected path %s", request.URL.Path)
+		}
+	}))
+	defer upstream.Close()
+
+	service := orb.NewService(orb.ConfiguredRegistry(orb.RegistryConfig{
+		PrivateBaseURL: upstream.URL,
+		HTTPClient:     upstream.Client(),
+	}))
+
+	body := []byte(`{
+		"model":"orb/private/qwen3-32b",
+		"stream":true,
+		"input":[{"role":"user","content":[{"type":"input_text","text":"hello private orb"}]}]
+	}`)
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	recorder := httptest.NewRecorder()
+
+	NewServerWithService(service).ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", recorder.Code)
+	}
+
+	if contentType := recorder.Header().Get("Content-Type"); contentType != "text/event-stream" {
+		t.Fatalf("expected sse content type, got %q", contentType)
+	}
+
+	responseBody := recorder.Body.String()
+	if !strings.Contains(responseBody, "event: response.output_text.delta") {
+		t.Fatalf("expected response.output_text.delta event, got %s", responseBody)
+	}
+
+	if !strings.Contains(responseBody, `"delta":"private hello"`) {
+		t.Fatalf("expected private delta payload, got %s", responseBody)
+	}
+}
+
 func TestModelsIncludesPrivateHTTPDiscoveryMetadata(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/v1/models" {

@@ -220,9 +220,12 @@ Current implementation note:
 - Orb accepts a top-level `stream: true` field on `POST /v1/responses`.
 - Hosted OpenAI-backed models currently return server-sent events with
   `Content-Type: text/event-stream`.
-- Orb currently passes through OpenAI typed event names such as
-  `response.created`, `response.output_text.delta`, `response.completed`, and
-  `error`.
+- Private `private-http` routes can also return server-sent events when the
+  upstream private runtime supports streaming.
+- Orb currently passes through typed event names and JSON event payloads from
+  the selected upstream adapter. OpenAI-backed routes currently emit event names
+  such as `response.created`, `response.output_text.delta`, `response.completed`,
+  and `error`.
 - Streaming is adapter-specific for now. If a client requests streaming for a
   model that does not support it, Orb currently returns an SSE `error` event
   rather than switching to a JSON error body mid-stream.
@@ -261,6 +264,29 @@ data: {"type":"response.output_text.delta","delta":"hello"}
 
 event: response.completed
 data: {"type":"response.completed","response":{"id":"resp_stream","status":"completed"}}
+```
+
+Representative streamed private route request after setting
+`ORB_PRIVATE_BASE_URL`:
+
+```bash
+curl -N http://localhost:8080/v1/responses \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "orb/private/qwen3-32b",
+    "stream": true,
+    "input": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Give me one short deployment note."
+          }
+        ]
+      }
+    ]
+  }'
 ```
 
 `GET /v1/responses/{response_id}` should provide a retrieval path for runtimes
@@ -371,6 +397,10 @@ When `ORB_PRIVATE_BASE_URL` is configured, the bundled private route is
 replaced by a `private-http` adapter that forwards Orb-style `/v1/responses`
 requests to an upstream private runtime. That adapter can also attach an auth
 header for upstream private deployments.
+
+If the upstream private runtime supports SSE responses, that same `private-http`
+adapter also forwards top-level `stream: true` requests and passes through
+upstream event names and event payloads.
 
 If only `ORB_PRIVATE_BASE_URL` is set, the adapter uses upstream
 `GET /v1/models` discovery and exposes each discovered private model as

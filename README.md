@@ -135,6 +135,32 @@ by a `private-http` adapter that forwards `POST /v1/responses` calls to the
 upstream runtime. Optional auth headers can be attached through
 `ORB_PRIVATE_AUTH_HEADER` and `ORB_PRIVATE_AUTH_TOKEN`.
 
+If the upstream private runtime supports streaming, Orb also forwards
+`"stream": true` requests for private models and returns server-sent events from
+the upstream runtime.
+
+Example streamed private request after setting `ORB_PRIVATE_BASE_URL`:
+
+```bash
+curl -N http://localhost:8080/v1/responses \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "orb/private/qwen3-32b",
+    "stream": true,
+    "input": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Give me one short deployment note."
+          }
+        ]
+      }
+    ]
+  }'
+```
+
 Private routing currently supports two modes:
 
 - automatic discovery mode: if only `ORB_PRIVATE_BASE_URL` is set, Orb queries
@@ -170,8 +196,9 @@ Early implementation skeleton.
 This repository currently exists to establish the public home for Agentex Orb
 and to document its intended direction. It now includes a minimal HTTP service,
 an adapter-backed runtime skeleton, bundled local/private echo adapters, a real
-hosted OpenAI adapter, and an upstream private HTTP adapter with model
-discovery. It does not yet contain production runtime code.
+hosted OpenAI adapter with streaming support, and an upstream private HTTP
+adapter with model discovery and streaming pass-through. It does not yet
+contain production runtime code.
 
 ## License
 
