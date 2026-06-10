@@ -6,10 +6,13 @@ import (
 	"encoding/hex"
 	"net/http"
 	"strings"
+	"sync"
 )
 
 type Service struct {
-	registry *Registry
+	registry    *Registry
+	responsesMu sync.RWMutex
+	responses   map[string]Response
 }
 
 type Adapter interface {
@@ -104,7 +107,10 @@ func NewService(registry *Registry) *Service {
 		registry = DefaultRegistry()
 	}
 
-	return &Service{registry: registry}
+	return &Service{
+		registry:  registry,
+		responses: make(map[string]Response),
+	}
 }
 
 func (s *Service) Models(ctx context.Context) []Model {
@@ -147,6 +153,8 @@ func (s *Service) CreateResponse(ctx context.Context, request Request) (Response
 		response.Runtime.Status = model.Status
 	}
 
+	s.storeResponse(response)
+
 	return response, nil
 }
 
@@ -171,6 +179,35 @@ func (s *Service) StreamResponse(ctx context.Context, request Request, emit func
 	}
 
 	return normalizeError(streamingAdapter.GenerateStream(ctx, request, emit))
+}
+
+func (s *Service) GetResponse(_ context.Context, responseID string) (Response, error) {
+	responseID = strings.TrimSpace(responseID)
+	if responseID == "" {
+		return Response{}, &Error{
+			Code:       "invalid_argument",
+			Message:    "response_id is required",
+			Details:    map[string]any{"field": "response_id"},
+			StatusCode: http.StatusBadRequest,
+		}
+	}
+
+	s.responsesMu.RLock()
+	response, ok := s.responses[responseID]
+	s.responsesMu.RUnlock()
+	if !ok {
+		return Response{}, &Error{
+			Code:    "not_found",
+			Message: "response " + `"` + responseID + `"` + " is not available in the current runtime",
+			Details: map[string]any{
+				"response_id": responseID,
+				"persistence": "memory_only",
+			},
+			StatusCode: http.StatusNotFound,
+		}
+	}
+
+	return cloneResponse(response), nil
 }
 
 func validateRequest(request Request) error {
@@ -262,6 +299,16 @@ func newResponseID() string {
 	return "resp_" + hex.EncodeToString(randomBytes)
 }
 
+func (s *Service) storeResponse(response Response) {
+	if s == nil || strings.TrimSpace(response.ID) == "" {
+		return
+	}
+
+	s.responsesMu.Lock()
+	s.responses[response.ID] = cloneResponse(response)
+	s.responsesMu.Unlock()
+}
+
 func cloneModels(models []Model) []Model {
 	if len(models) == 0 {
 		return nil
@@ -299,5 +346,13 @@ func cloneMetadata(metadata map[string]any) map[string]any {
 		}
 	}
 
+	return cloned
+}
+
+func cloneResponse(response Response) Response {
+	cloned := response
+	if len(response.Output) > 0 {
+		cloned.Output = append([]OutputItem(nil), response.Output...)
+	}
 	return cloned
 }

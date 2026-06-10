@@ -143,7 +143,53 @@ func TestResponsesReturnsPrivateEchoPayload(t *testing.T) {
 	}
 }
 
-func TestResponseByIDReturnsNotFoundPlaceholder(t *testing.T) {
+func TestResponseByIDReturnsStoredResponse(t *testing.T) {
+	handler := NewServer()
+
+	createBody := []byte(`{
+		"model":"orb/example-text",
+		"input":[{"role":"user","content":[{"type":"input_text","text":"hello orb"}]}]
+	}`)
+	createRequest := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(createBody))
+	createRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(createRecorder, createRequest)
+
+	if createRecorder.Code != http.StatusOK {
+		t.Fatalf("expected create status 200, got %d", createRecorder.Code)
+	}
+
+	var created ResponseEnvelope
+	if err := json.Unmarshal(createRecorder.Body.Bytes(), &created); err != nil {
+		t.Fatalf("expected valid create JSON response: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/responses/"+created.ID, nil)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", recorder.Code)
+	}
+
+	if contentType := recorder.Header().Get("Content-Type"); contentType != "application/json" {
+		t.Fatalf("expected json content type, got %q", contentType)
+	}
+
+	var response ResponseEnvelope
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("expected valid JSON response: %v", err)
+	}
+
+	if response.ID != created.ID || response.Model != "orb/example-text" {
+		t.Fatalf("unexpected retrieved response payload: %#v", response)
+	}
+
+	if len(response.Output) != 1 || response.Output[0].Text != "Echo: hello orb" {
+		t.Fatalf("unexpected retrieved output payload: %#v", response.Output)
+	}
+}
+
+func TestResponseByIDReturnsNotFoundForUnknownResponse(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/v1/responses/resp_123", nil)
 	recorder := httptest.NewRecorder()
 
@@ -153,16 +199,12 @@ func TestResponseByIDReturnsNotFoundPlaceholder(t *testing.T) {
 		t.Fatalf("expected status 404, got %d", recorder.Code)
 	}
 
-	if contentType := recorder.Header().Get("Content-Type"); contentType != "application/json" {
-		t.Fatalf("expected json content type, got %q", contentType)
-	}
-
 	if !strings.Contains(recorder.Body.String(), `"not_found"`) {
 		t.Fatalf("expected not_found error, got %s", recorder.Body.String())
 	}
 
-	if !strings.Contains(recorder.Body.String(), `"persistence":"disabled"`) {
-		t.Fatalf("expected persistence placeholder detail, got %s", recorder.Body.String())
+	if !strings.Contains(recorder.Body.String(), `"persistence":"memory_only"`) {
+		t.Fatalf("expected memory_only detail, got %s", recorder.Body.String())
 	}
 }
 

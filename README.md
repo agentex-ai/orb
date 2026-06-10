@@ -93,8 +93,10 @@ curl http://localhost:8080/v1/responses \
   }'
 ```
 
-Current response retrieval is a placeholder route. It returns `not_found` until
-Orb grows a persistence layer for stored responses and asynchronous retrieval.
+Current response retrieval stores completed non-stream responses in memory for
+the life of the current server process. `GET /v1/responses/{response_id}` can
+read those responses back until the process restarts. Streamed responses are not
+stored yet.
 
 The current runtime uses a model-routed adapter registry. The default registry
 currently exposes:

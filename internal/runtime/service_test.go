@@ -102,3 +102,46 @@ func TestServiceRoutesToRegisteredAdapterByModel(t *testing.T) {
 		t.Fatalf("unexpected routed output payload: %#v", response.Output)
 	}
 }
+
+func TestServiceGetResponseReturnsStoredResponse(t *testing.T) {
+	service := NewService(DefaultRegistry())
+
+	created, err := service.CreateResponse(context.Background(), Request{
+		Model: "orb/example-text",
+		Input: []InputMessage{{Role: "user", Content: []InputContent{{Type: "input_text", Text: "hello orb"}}}},
+	})
+	if err != nil {
+		t.Fatalf("expected create success, got %v", err)
+	}
+
+	stored, err := service.GetResponse(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("expected retrieval success, got %v", err)
+	}
+
+	if stored.ID != created.ID || stored.Model != created.Model {
+		t.Fatalf("unexpected stored response payload: %#v", stored)
+	}
+
+	if len(stored.Output) != 1 || stored.Output[0].Text != "Echo: hello orb" {
+		t.Fatalf("unexpected stored output payload: %#v", stored.Output)
+	}
+}
+
+func TestServiceGetResponseReturnsNotFoundForUnknownResponse(t *testing.T) {
+	service := NewService(DefaultRegistry())
+
+	_, err := service.GetResponse(context.Background(), "resp_missing")
+	if err == nil {
+		t.Fatal("expected not found error")
+	}
+
+	apiErr, ok := err.(*Error)
+	if !ok || apiErr.Code != "not_found" {
+		t.Fatalf("unexpected error: %#v", err)
+	}
+
+	if apiErr.Details["persistence"] != "memory_only" {
+		t.Fatalf("expected memory_only detail, got %#v", apiErr.Details)
+	}
+}

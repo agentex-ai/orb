@@ -300,19 +300,47 @@ curl http://localhost:8080/v1/responses/resp_123
 
 ```json
 {
-  "error": {
-    "code": "not_found",
-    "message": "response \"resp_123\" is not available in the current runtime",
-    "details": {
-      "response_id": "resp_123",
-      "persistence": "disabled"
+  "id": "resp_123",
+  "object": "response",
+  "model": "orb/example-text",
+  "output": [
+    {
+      "type": "output_text",
+      "text": "Echo: hello orb"
     }
+  ],
+  "usage": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "total_tokens": 0
+  },
+  "runtime": {
+    "adapter": "echo",
+    "deployment": "local",
+    "memory_applied": false,
+    "status": "ready"
   }
 }
 ```
 
-The current server exposes this route as a placeholder so clients can depend on
-the path shape early. Orb does not yet persist responses for later lookup.
+The current server stores completed non-stream responses in memory for the life
+of the current process, so this route only works for responses created by the
+same running Orb instance.
+
+When a response is missing, Orb returns:
+
+```json
+{
+  "error": {
+    "code": "not_found",
+    "message": "response \"resp_missing\" is not available in the current runtime",
+    "details": {
+      "response_id": "resp_missing",
+      "persistence": "memory_only"
+    }
+  }
+}
+```
 
 ### Memory
 
@@ -402,9 +430,10 @@ The current repository implementation serves an early subset of this API with a
 model-routed adapter registry and a bundled local `echo` adapter for the model
 `orb/example-text`.
 
-The current HTTP server also exposes `GET /v1/responses/{response_id}` as a
-placeholder retrieval route. Today it returns a structured `not_found` response
-because response persistence is not implemented yet.
+The current HTTP server also exposes `GET /v1/responses/{response_id}` with an
+in-memory response store. Responses created through non-stream `POST
+/v1/responses` calls can be retrieved from the same running process until the
+server restarts.
 
 When `ORB_OPENAI_API_KEY` and `ORB_OPENAI_MODEL_ID` are configured, the runtime
 also exposes a hosted OpenAI-backed model as `orb/openai/<model-id>` by

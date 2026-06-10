@@ -211,12 +211,27 @@ func (s server) handleResponseByID(writer http.ResponseWriter, request *http.Req
 		return
 	}
 
-	writeError(writer, http.StatusNotFound, APIError{
-		Code:    "not_found",
-		Message: "response " + `"` + responseID + `"` + " is not available in the current runtime",
-		Details: map[string]any{
-			"response_id": responseID,
-			"persistence": "disabled",
+	response, err := s.service.GetResponse(request.Context(), responseID)
+	if err != nil {
+		writeServiceError(writer, err)
+		return
+	}
+
+	writeJSON(writer, http.StatusOK, ResponseEnvelope{
+		ID:     response.ID,
+		Object: response.Object,
+		Model:  response.Model,
+		Output: toHTTPOutput(response.Output),
+		Usage: Usage{
+			InputTokens:  response.Usage.InputTokens,
+			OutputTokens: response.Usage.OutputTokens,
+			TotalTokens:  response.Usage.TotalTokens,
+		},
+		Runtime: Runtime{
+			Adapter:       response.Runtime.Adapter,
+			Deployment:    response.Runtime.Deployment,
+			MemoryApplied: response.Runtime.MemoryApplied,
+			Status:        response.Runtime.Status,
 		},
 	})
 }
