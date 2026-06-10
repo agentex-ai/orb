@@ -226,6 +226,11 @@ The current repository implementation serves an early subset of this API with a
 model-routed adapter registry and a bundled local `echo` adapter for the model
 `orb/example-text`.
 
+When `ORB_OPENAI_API_KEY` and `ORB_OPENAI_MODEL_ID` are configured, the runtime
+also exposes a hosted OpenAI-backed model as `orb/openai/<model-id>` by
+default. That path currently forwards Orb-style `/v1/responses` calls to the
+OpenAI Responses API.
+
 The default runtime also exposes a bundled private-style model,
 `orb/private-example-text`, so the current skeleton already exercises model
 routing across more than one deployment type.

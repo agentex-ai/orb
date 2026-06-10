@@ -84,8 +84,8 @@ The first implementation should avoid overcommitting to:
 Early implementation skeleton.
 
 The repository now includes a minimal Go HTTP service, a model-routed adapter
-registry, bundled local and private echo adapters, and an upstream private HTTP
-adapter with model discovery.
+registry, bundled local and private echo adapters, a hosted OpenAI adapter, and
+an upstream private HTTP adapter with model discovery.
 
 Implementation details such as storage backends, memory architecture,
 deployment model, and broader runtime contracts remain open and should keep

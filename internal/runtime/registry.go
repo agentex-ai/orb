@@ -31,6 +31,10 @@ func DefaultRegistry() *Registry {
 }
 
 type RegistryConfig struct {
+	OpenAIBaseURL          string
+	OpenAIAPIKey           string
+	OpenAIModelID          string
+	OpenAIPublicModelID    string
 	PrivateBaseURL         string
 	PrivateModelID         string
 	PrivateUpstreamModelID string
@@ -40,8 +44,28 @@ type RegistryConfig struct {
 }
 
 func ConfiguredRegistry(config RegistryConfig) *Registry {
+	adapters := []Adapter{
+		NewEchoAdapter(),
+	}
+
+	if strings.TrimSpace(config.OpenAIAPIKey) != "" && strings.TrimSpace(config.OpenAIModelID) != "" {
+		openAIAdapter, err := NewOpenAIAdapter(OpenAIAdapterConfig{
+			BaseURL:       config.OpenAIBaseURL,
+			APIKey:        config.OpenAIAPIKey,
+			ModelID:       config.OpenAIModelID,
+			PublicModelID: config.OpenAIPublicModelID,
+			Client:        config.HTTPClient,
+		})
+		if err != nil {
+			log.Printf("orb: invalid openai adapter config, skipping openai adapter: %v", err)
+		} else {
+			adapters = append(adapters, openAIAdapter)
+		}
+	}
+
 	if strings.TrimSpace(config.PrivateBaseURL) == "" {
-		return DefaultRegistry()
+		adapters = append(adapters, NewPrivateEchoAdapter())
+		return NewRegistry(adapters...)
 	}
 
 	privateAdapter, err := NewPrivateHTTPAdapter(PrivateHTTPAdapterConfig{
@@ -54,13 +78,12 @@ func ConfiguredRegistry(config RegistryConfig) *Registry {
 	})
 	if err != nil {
 		log.Printf("orb: invalid private http adapter config, falling back to bundled private adapter: %v", err)
-		return DefaultRegistry()
+		adapters = append(adapters, NewPrivateEchoAdapter())
+		return NewRegistry(adapters...)
 	}
 
-	return NewRegistry(
-		NewEchoAdapter(),
-		privateAdapter,
-	)
+	adapters = append(adapters, privateAdapter)
+	return NewRegistry(adapters...)
 }
 
 func (r *Registry) Models(ctx context.Context) []Model {

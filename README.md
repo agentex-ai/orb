@@ -51,6 +51,13 @@ go run ./cmd/orb
 The server listens on `:8080` by default. Set `ORB_ADDR` to override the bind
 address.
 
+Optional OpenAI hosted routing environment variables:
+
+- `ORB_OPENAI_API_KEY`: OpenAI API key for the hosted adapter
+- `ORB_OPENAI_MODEL_ID`: upstream OpenAI model id to call, such as `gpt-5-mini`
+- `ORB_OPENAI_PUBLIC_MODEL_ID`: optional Orb-visible model id override; defaults to `orb/openai/<model-id>`
+- `ORB_OPENAI_BASE_URL`: optional OpenAI-compatible base URL override; defaults to `https://api.openai.com/v1`
+
 Optional private routing environment variables:
 
 - `ORB_PRIVATE_BASE_URL`: upstream Orb-compatible private runtime base URL
@@ -59,7 +66,7 @@ Optional private routing environment variables:
 - `ORB_PRIVATE_AUTH_HEADER`: auth header name for upstream private requests, defaults to `Authorization`
 - `ORB_PRIVATE_AUTH_TOKEN`: auth token for upstream private requests; when using `Authorization`, Orb sends `Bearer <token>` unless the token already contains a space
 
-Current placeholder endpoints:
+Current implemented endpoints:
 
 - `GET /v1/models`
 - `POST /v1/responses`
@@ -69,6 +76,10 @@ currently exposes:
 
 - a bundled local `echo` adapter with the model `orb/example-text`
 - a bundled private-style `echo` adapter with the model `orb/private-example-text`
+
+When `ORB_OPENAI_API_KEY` and `ORB_OPENAI_MODEL_ID` are configured, Orb also
+exposes a hosted OpenAI-backed model. By default, that model is visible as
+`orb/openai/<model-id>` and is executed through OpenAI's Responses API.
 
 When `ORB_PRIVATE_BASE_URL` is configured, the bundled private route is replaced
 by a `private-http` adapter that forwards `POST /v1/responses` calls to the
@@ -109,9 +120,9 @@ Early implementation skeleton.
 
 This repository currently exists to establish the public home for Agentex Orb
 and to document its intended direction. It now includes a minimal HTTP service,
-an adapter-backed runtime skeleton, bundled local/private echo adapters, and an
-upstream private HTTP adapter with model discovery. It does not yet contain
-production runtime code.
+an adapter-backed runtime skeleton, bundled local/private echo adapters, a real
+hosted OpenAI adapter, and an upstream private HTTP adapter with model
+discovery. It does not yet contain production runtime code.
 
 ## License
 

@@ -143,6 +143,101 @@ func TestResponsesReturnsPrivateEchoPayload(t *testing.T) {
 	}
 }
 
+func TestModelsIncludesConfiguredOpenAIModel(t *testing.T) {
+	service := orb.NewService(orb.ConfiguredRegistry(orb.RegistryConfig{
+		OpenAIAPIKey:  "test-key",
+		OpenAIModelID: "gpt-5-mini",
+	}))
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	recorder := httptest.NewRecorder()
+
+	NewServerWithService(service).ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", recorder.Code)
+	}
+
+	var response ModelList
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("expected valid JSON response: %v", err)
+	}
+
+	if len(response.Data) != 3 {
+		t.Fatalf("expected 3 models, got %#v", response.Data)
+	}
+
+	if response.Data[1].ID != "orb/openai/gpt-5-mini" || response.Data[1].Provider != "openai" || response.Data[1].Deployment != "hosted" {
+		t.Fatalf("unexpected openai model payload: %#v", response.Data[1])
+	}
+}
+
+func TestResponsesRoutesToOpenAIAdapter(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/responses" {
+			t.Fatalf("expected /v1/responses, got %s", request.URL.Path)
+		}
+
+		writer.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(writer).Encode(map[string]any{
+			"id":     "resp_openai",
+			"object": "response",
+			"model":  "gpt-5-mini",
+			"status": "completed",
+			"output": []map[string]any{
+				{
+					"type": "message",
+					"content": []map[string]any{
+						{
+							"type": "output_text",
+							"text": "hosted route ok",
+						},
+					},
+				},
+			},
+			"usage": map[string]any{
+				"input_tokens":  8,
+				"output_tokens": 3,
+				"total_tokens":  11,
+			},
+		})
+	}))
+	defer upstream.Close()
+
+	service := orb.NewService(orb.ConfiguredRegistry(orb.RegistryConfig{
+		OpenAIBaseURL: upstream.URL + "/v1",
+		OpenAIAPIKey:  "test-key",
+		OpenAIModelID: "gpt-5-mini",
+		HTTPClient:    upstream.Client(),
+	}))
+
+	body := []byte(`{
+		"model":"orb/openai/gpt-5-mini",
+		"input":[{"role":"user","content":[{"type":"input_text","text":"hello hosted orb"}]}]
+	}`)
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	recorder := httptest.NewRecorder()
+
+	NewServerWithService(service).ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", recorder.Code)
+	}
+
+	var response ResponseEnvelope
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("expected valid JSON response: %v", err)
+	}
+
+	if response.Model != "orb/openai/gpt-5-mini" || response.Runtime.Adapter != "openai" || response.Runtime.Deployment != "hosted" {
+		t.Fatalf("unexpected hosted response payload: %#v", response)
+	}
+
+	if len(response.Output) != 1 || response.Output[0].Text != "hosted route ok" {
+		t.Fatalf("unexpected hosted output payload: %#v", response.Output)
+	}
+}
+
 func TestModelsIncludesPrivateHTTPDiscoveryMetadata(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/v1/models" {

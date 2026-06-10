@@ -44,8 +44,9 @@ first usable Orb runtime.
 Orb is currently between Phase 1 and early Phase 2.
 
 The repository now has a minimal HTTP runtime skeleton, bundled local/private
-adapters, and a private HTTP forwarding path with upstream model discovery.
+adapters, a hosted OpenAI adapter, and a private HTTP forwarding path with
+upstream model discovery.
 
-The next meaningful milestone is to keep tightening the runtime boundary while
-adding the first real provider adapters, memory hooks, and operational
+The next meaningful milestone is to keep tightening the runtime boundary,
+expanding provider coverage, and adding memory hooks plus operational
 hardening.

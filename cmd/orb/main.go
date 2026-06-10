@@ -19,6 +19,10 @@ func main() {
 	server := &http.Server{
 		Addr: addr,
 		Handler: httpapi.NewServerWithService(runtime.NewService(runtime.ConfiguredRegistry(runtime.RegistryConfig{
+			OpenAIBaseURL:          os.Getenv("ORB_OPENAI_BASE_URL"),
+			OpenAIAPIKey:           os.Getenv("ORB_OPENAI_API_KEY"),
+			OpenAIModelID:          os.Getenv("ORB_OPENAI_MODEL_ID"),
+			OpenAIPublicModelID:    os.Getenv("ORB_OPENAI_PUBLIC_MODEL_ID"),
 			PrivateBaseURL:         os.Getenv("ORB_PRIVATE_BASE_URL"),
 			PrivateModelID:         os.Getenv("ORB_PRIVATE_MODEL_ID"),
 			PrivateUpstreamModelID: os.Getenv("ORB_PRIVATE_UPSTREAM_MODEL"),
