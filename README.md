@@ -71,6 +71,27 @@ Current implemented endpoints:
 - `GET /v1/models`
 - `POST /v1/responses`
 
+Try the bundled local model:
+
+```bash
+curl http://localhost:8080/v1/responses \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "orb/example-text",
+    "input": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "hello orb"
+          }
+        ]
+      }
+    ]
+  }'
+```
+
 The current runtime uses a model-routed adapter registry. The default registry
 currently exposes:
 
@@ -85,6 +106,29 @@ That hosted path also supports streaming through `POST /v1/responses` with a
 top-level `"stream": true` field. Orb returns server-sent events and currently
 passes through OpenAI's typed event names such as `response.created`,
 `response.output_text.delta`, `response.completed`, and `error`.
+
+Example streamed hosted request after setting `ORB_OPENAI_API_KEY` and
+`ORB_OPENAI_MODEL_ID=gpt-5-mini`:
+
+```bash
+curl -N http://localhost:8080/v1/responses \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "orb/openai/gpt-5-mini",
+    "stream": true,
+    "input": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Write one short line about Agentex Orb."
+          }
+        ]
+      }
+    ]
+  }'
+```
 
 When `ORB_PRIVATE_BASE_URL` is configured, the bundled private route is replaced
 by a `private-http` adapter that forwards `POST /v1/responses` calls to the
