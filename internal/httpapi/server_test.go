@@ -807,3 +807,197 @@ func TestResponsesRoutesToDiscoveredPrivateHTTPModel(t *testing.T) {
 		t.Fatalf("unexpected discovered private output payload: %#v", response.Output)
 	}
 }
+
+func TestHarnessBundles(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/harness/bundles", nil)
+	recorder := httptest.NewRecorder()
+
+	NewServer().ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", recorder.Code)
+	}
+
+	var response HarnessBundleList
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("expected valid JSON response: %v", err)
+	}
+
+	if response.Object != "list" {
+		t.Fatalf("expected list object, got %q", response.Object)
+	}
+
+	if len(response.Data) != 5 {
+		t.Fatalf("expected 5 harness bundles, got %#v", response.Data)
+	}
+
+	if response.Data[0].ID != "core/exact_math" || !response.Data[0].DefaultEnabled {
+		t.Fatalf("unexpected first bundle payload: %#v", response.Data[0])
+	}
+
+	if response.Data[3].ID != "memory/scope_recall" || response.Data[3].Category != "memory" {
+		t.Fatalf("unexpected memory bundle payload: %#v", response.Data[3])
+	}
+}
+
+func TestHarnessExperimentsCreateListAndFetch(t *testing.T) {
+	handler := NewServer()
+	body := []byte(`{
+		"experiment_id":"exp_private_memory_001",
+		"user_objective":{"primary":"balanced"},
+		"bundles":["core/exact_math","memory/scope_recall"],
+		"search_space":{"models":{"ids":["orb/example-text"]}}
+	}`)
+
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/v1/harness/experiments", bytes.NewReader(body))
+	createRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(createRecorder, createRequest)
+
+	if createRecorder.Code != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d", createRecorder.Code)
+	}
+
+	var created HarnessExperimentDetail
+	if err := json.Unmarshal(createRecorder.Body.Bytes(), &created); err != nil {
+		t.Fatalf("expected valid JSON response: %v", err)
+	}
+
+	if created.ExperimentID != "exp_private_memory_001" || created.Object != "harness.experiment" {
+		t.Fatalf("unexpected create payload: %#v", created)
+	}
+
+	if created.State != "queued" || created.Objective != "balanced" || created.Progress != 0 {
+		t.Fatalf("unexpected experiment state: %#v", created)
+	}
+
+	if created.Artifacts["status_path"] != "/api/v1/harness/experiments/exp_private_memory_001" {
+		t.Fatalf("unexpected status path: %#v", created.Artifacts)
+	}
+
+	listRequest := httptest.NewRequest(http.MethodGet, "/api/v1/harness/experiments", nil)
+	listRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(listRecorder, listRequest)
+
+	if listRecorder.Code != http.StatusOK {
+		t.Fatalf("expected list status 200, got %d", listRecorder.Code)
+	}
+
+	var listed HarnessExperimentList
+	if err := json.Unmarshal(listRecorder.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("expected valid list JSON response: %v", err)
+	}
+
+	if listed.Object != "list" || len(listed.Data) != 1 || listed.Data[0].ExperimentID != "exp_private_memory_001" {
+		t.Fatalf("unexpected experiment list payload: %#v", listed)
+	}
+
+	getRequest := httptest.NewRequest(http.MethodGet, "/api/v1/harness/experiments/exp_private_memory_001", nil)
+	getRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(getRecorder, getRequest)
+
+	if getRecorder.Code != http.StatusOK {
+		t.Fatalf("expected get status 200, got %d", getRecorder.Code)
+	}
+
+	var fetched HarnessExperimentDetail
+	if err := json.Unmarshal(getRecorder.Body.Bytes(), &fetched); err != nil {
+		t.Fatalf("expected valid get JSON response: %v", err)
+	}
+
+	if fetched.ExperimentID != created.ExperimentID || fetched.State != "queued" {
+		t.Fatalf("unexpected fetched experiment payload: %#v", fetched)
+	}
+}
+
+func TestHarnessExperimentsRejectDuplicateExperimentID(t *testing.T) {
+	handler := NewServer()
+	body := []byte(`{
+		"experiment_id":"exp_duplicate_001",
+		"user_objective":{"primary":"balanced"},
+		"bundles":["core/exact_math"]
+	}`)
+
+	firstRequest := httptest.NewRequest(http.MethodPost, "/api/v1/harness/experiments", bytes.NewReader(body))
+	firstRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(firstRecorder, firstRequest)
+
+	if firstRecorder.Code != http.StatusAccepted {
+		t.Fatalf("expected first status 202, got %d", firstRecorder.Code)
+	}
+
+	secondRequest := httptest.NewRequest(http.MethodPost, "/api/v1/harness/experiments", bytes.NewReader(body))
+	secondRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(secondRecorder, secondRequest)
+
+	if secondRecorder.Code != http.StatusConflict {
+		t.Fatalf("expected duplicate status 409, got %d", secondRecorder.Code)
+	}
+
+	if !strings.Contains(secondRecorder.Body.String(), `"already_exists"`) {
+		t.Fatalf("expected already_exists error, got %s", secondRecorder.Body.String())
+	}
+}
+
+func TestHarnessExperimentsValidateRequiredFields(t *testing.T) {
+	body := []byte(`{"experiment_id":"exp_invalid_001","bundles":["core/exact_math"]}`)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/harness/experiments", bytes.NewReader(body))
+	recorder := httptest.NewRecorder()
+
+	NewServer().ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", recorder.Code)
+	}
+
+	if !strings.Contains(recorder.Body.String(), `"user_objective.primary is required"`) {
+		t.Fatalf("expected objective validation error, got %s", recorder.Body.String())
+	}
+}
+
+func TestHarnessExperimentNotFound(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/harness/experiments/exp_missing", nil)
+	recorder := httptest.NewRecorder()
+
+	NewServer().ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d", recorder.Code)
+	}
+
+	if !strings.Contains(recorder.Body.String(), `"experiment_not_found"`) {
+		t.Fatalf("expected experiment_not_found error, got %s", recorder.Body.String())
+	}
+}
+
+func TestHarnessExperimentArtifactNotMaterialized(t *testing.T) {
+	handler := NewServer()
+	body := []byte(`{
+		"experiment_id":"exp_artifact_001",
+		"user_objective":{"primary":"balanced"},
+		"bundles":["core/exact_math"]
+	}`)
+
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/v1/harness/experiments", bytes.NewReader(body))
+	createRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(createRecorder, createRequest)
+
+	if createRecorder.Code != http.StatusAccepted {
+		t.Fatalf("expected create status 202, got %d", createRecorder.Code)
+	}
+
+	artifactRequest := httptest.NewRequest(http.MethodGet, "/api/v1/harness/experiments/exp_artifact_001/artifacts/report", nil)
+	artifactRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(artifactRecorder, artifactRequest)
+
+	if artifactRecorder.Code != http.StatusNotFound {
+		t.Fatalf("expected artifact status 404, got %d", artifactRecorder.Code)
+	}
+
+	if !strings.Contains(artifactRecorder.Body.String(), `"artifact_not_found"`) {
+		t.Fatalf("expected artifact_not_found error, got %s", artifactRecorder.Body.String())
+	}
+
+	if !strings.Contains(artifactRecorder.Body.String(), `"state":"queued"`) {
+		t.Fatalf("expected queued state detail, got %s", artifactRecorder.Body.String())
+	}
+}

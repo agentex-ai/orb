@@ -110,6 +110,7 @@ type APIError struct {
 
 type server struct {
 	service *orb.Service
+	harness *harnessRegistry
 }
 
 func NewServer() http.Handler {
@@ -121,13 +122,18 @@ func NewServerWithService(service *orb.Service) http.Handler {
 		service = orb.NewService(orb.DefaultRegistry())
 	}
 
-	api := server{service: service}
+	api := server{service: service, harness: newHarnessRegistry()}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/models", api.handleModels)
 	mux.HandleFunc("POST /v1/responses", api.handleResponses)
 	mux.HandleFunc("GET /v1/responses/{response_id}", api.handleResponseByID)
 	mux.HandleFunc("POST /v1/memory/query", api.handleMemoryQuery)
 	mux.HandleFunc("POST /v1/runs", api.handleRuns)
+	mux.HandleFunc("GET /api/v1/harness/bundles", api.handleHarnessBundles)
+	mux.HandleFunc("POST /api/v1/harness/experiments", api.handleHarnessCreateExperiment)
+	mux.HandleFunc("GET /api/v1/harness/experiments", api.handleHarnessListExperiments)
+	mux.HandleFunc("GET /api/v1/harness/experiments/{experiment_id}/artifacts/{artifact}", api.handleHarnessExperimentArtifact)
+	mux.HandleFunc("GET /api/v1/harness/experiments/{experiment_id}", api.handleHarnessExperiment)
 	return mux
 }
 
