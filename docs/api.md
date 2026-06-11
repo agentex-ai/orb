@@ -2,6 +2,9 @@
 
 This document outlines the first public API shape for Agentex Orb.
 
+For a machine-readable view of the currently implemented HTTP surface, see
+[docs/openapi.yaml](openapi.yaml).
+
 The goal of this draft is to define a small, stable surface that can support:
 
 - model discovery,

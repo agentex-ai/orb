@@ -38,6 +38,7 @@ The long-term goal is to support:
 
 - [Architecture Direction](docs/architecture.md)
 - [API Draft](docs/api.md)
+- [OpenAPI Spec](docs/openapi.yaml)
 - [Roadmap](docs/roadmap.md)
 
 ## Quick Start

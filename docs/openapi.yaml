@@ -1,0 +1,468 @@
+openapi: 3.1.0
+info:
+  title: Agentex Orb API
+  version: 0.1.0
+  summary: Current HTTP surface for the Agentex Orb runtime skeleton.
+  description: |
+    This OpenAPI document describes the current implemented HTTP surface of
+    Agentex Orb.
+
+    The current server supports:
+    - model discovery,
+    - response execution,
+    - in-memory response retrieval,
+    - in-memory memory query,
+    - a thin runs wrapper over the response execution path.
+
+    Some behaviors are intentionally early-stage:
+    - `GET /v1/responses/{response_id}` only returns responses created by the
+      same running Orb process.
+    - `POST /v1/memory/query` only returns memory entries collected in the same
+      running Orb process from non-stream requests with memory enabled.
+    - streamed requests return `text/event-stream` and currently pass through
+      upstream typed event names for streaming-enabled adapters.
+servers:
+  - url: http://localhost:8080
+paths:
+  /v1/models:
+    get:
+      operationId: listModels
+      summary: List visible models
+      tags:
+        - models
+      responses:
+        "200":
+          description: Model list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelList"
+              examples:
+                default:
+                  value:
+                    object: list
+                    data:
+                      - id: orb/example-text
+                        object: model
+                        provider: echo
+                        deployment: local
+                        capabilities:
+                          - text
+                        status: ready
+                      - id: orb/private-example-text
+                        object: model
+                        provider: private-echo
+                        deployment: private
+                        capabilities:
+                          - text
+                        status: ready
+  /v1/responses:
+    post:
+      operationId: createResponse
+      summary: Execute a response request
+      tags:
+        - responses
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResponseRequest"
+      responses:
+        "200":
+          description: |
+            Completed response for non-stream requests, or a server-sent event
+            stream when `stream=true` and the selected adapter supports
+            streaming.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+              examples:
+                local_echo:
+                  value:
+                    id: resp_example
+                    object: response
+                    model: orb/example-text
+                    output:
+                      - type: output_text
+                        text: Echo: hello orb
+                    usage:
+                      input_tokens: 0
+                      output_tokens: 0
+                      total_tokens: 0
+                    runtime:
+                      adapter: echo
+                      deployment: local
+                      memory_applied: true
+                      status: ready
+            text/event-stream:
+              schema:
+                type: string
+              examples:
+                openai_stream:
+                  value: |
+                    event: response.created
+                    data: {"type":"response.created","response":{"id":"resp_stream"}}
+
+                    event: response.output_text.delta
+                    data: {"type":"response.output_text.delta","delta":"hello"}
+
+                    event: response.completed
+                    data: {"type":"response.completed","response":{"id":"resp_stream","status":"completed"}}
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: Model not found for non-stream requests
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/responses/{response_id}:
+    get:
+      operationId: getResponse
+      summary: Retrieve a previously created response
+      tags:
+        - responses
+      parameters:
+        - name: response_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Stored response from the current running process
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+        "400":
+          description: Invalid response identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: Response not found in the current in-memory store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+              examples:
+                missing:
+                  value:
+                    error:
+                      code: not_found
+                      message: response "resp_missing" is not available in the current runtime
+                      details:
+                        response_id: resp_missing
+                        persistence: memory_only
+  /v1/memory/query:
+    post:
+      operationId: queryMemory
+      summary: Query in-memory scoped memory entries
+      tags:
+        - memory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemoryQueryRequest"
+      responses:
+        "200":
+          description: Matching memory entries from the current running process
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryQueryResponse"
+              examples:
+                default:
+                  value:
+                    object: list
+                    data:
+                      - id: mem_resp_123
+                        object: memory_entry
+                        scope: workspace:test
+                        response_id: resp_123
+                        model: orb/example-text
+                        input_text: hello orb
+                        output_text: Echo: hello orb
+        "400":
+          description: Invalid query payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/runs:
+    post:
+      operationId: createRun
+      summary: Execute a run request
+      description: |
+        The current implementation is a thin wrapper around `POST /v1/responses`
+        and accepts the same request body shape.
+      tags:
+        - runs
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResponseRequest"
+      responses:
+        "200":
+          description: |
+            Completed response for non-stream requests, or a server-sent event
+            stream when `stream=true` and the selected adapter supports
+            streaming.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseEnvelope"
+            text/event-stream:
+              schema:
+                type: string
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: Model not found for non-stream requests
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+components:
+  schemas:
+    Model:
+      type: object
+      required:
+        - id
+        - object
+        - provider
+        - deployment
+        - capabilities
+      properties:
+        id:
+          type: string
+        object:
+          type: string
+          example: model
+        provider:
+          type: string
+        deployment:
+          type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+    ModelList:
+      type: object
+      required:
+        - object
+        - data
+      properties:
+        object:
+          type: string
+          example: list
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Model"
+    ResponseRequest:
+      type: object
+      required:
+        - model
+        - input
+      properties:
+        model:
+          type: string
+        input:
+          type: array
+          items:
+            $ref: "#/components/schemas/InputMessage"
+        memory:
+          $ref: "#/components/schemas/MemoryRequest"
+        stream:
+          type: boolean
+        metadata:
+          type: object
+          additionalProperties: true
+        settings:
+          type: object
+          additionalProperties: true
+    InputMessage:
+      type: object
+      required:
+        - role
+        - content
+      properties:
+        role:
+          type: string
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/InputContent"
+    InputContent:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+        text:
+          type: string
+    MemoryRequest:
+      type: object
+      required:
+        - enabled
+      properties:
+        enabled:
+          type: boolean
+        scope:
+          type: string
+    ResponseEnvelope:
+      type: object
+      required:
+        - id
+        - object
+        - model
+        - output
+        - usage
+        - runtime
+      properties:
+        id:
+          type: string
+        object:
+          type: string
+          example: response
+        model:
+          type: string
+        output:
+          type: array
+          items:
+            $ref: "#/components/schemas/OutputItem"
+        usage:
+          $ref: "#/components/schemas/Usage"
+        runtime:
+          $ref: "#/components/schemas/Runtime"
+    OutputItem:
+      type: object
+      required:
+        - type
+        - text
+      properties:
+        type:
+          type: string
+        text:
+          type: string
+    Usage:
+      type: object
+      required:
+        - input_tokens
+        - output_tokens
+        - total_tokens
+      properties:
+        input_tokens:
+          type: integer
+        output_tokens:
+          type: integer
+        total_tokens:
+          type: integer
+    Runtime:
+      type: object
+      required:
+        - adapter
+        - deployment
+        - memory_applied
+        - status
+      properties:
+        adapter:
+          type: string
+        deployment:
+          type: string
+        memory_applied:
+          type: boolean
+        status:
+          type: string
+    MemoryQueryRequest:
+      type: object
+      required:
+        - scope
+      properties:
+        scope:
+          type: string
+        query:
+          type: string
+        limit:
+          type: integer
+          minimum: 1
+    MemoryQueryResponse:
+      type: object
+      required:
+        - object
+        - data
+      properties:
+        object:
+          type: string
+          example: list
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemoryItem"
+    MemoryItem:
+      type: object
+      required:
+        - id
+        - object
+        - scope
+        - response_id
+        - model
+      properties:
+        id:
+          type: string
+        object:
+          type: string
+          example: memory_entry
+        scope:
+          type: string
+        response_id:
+          type: string
+        model:
+          type: string
+        input_text:
+          type: string
+        output_text:
+          type: string
+    APIError:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+    ErrorEnvelope:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          $ref: "#/components/schemas/APIError"
