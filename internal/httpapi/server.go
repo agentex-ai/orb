@@ -127,6 +127,7 @@ func NewServerWithService(service *orb.Service) http.Handler {
 	mux.HandleFunc("POST /v1/responses", api.handleResponses)
 	mux.HandleFunc("GET /v1/responses/{response_id}", api.handleResponseByID)
 	mux.HandleFunc("POST /v1/memory/query", api.handleMemoryQuery)
+	mux.HandleFunc("POST /v1/runs", api.handleRuns)
 	return mux
 }
 
@@ -152,6 +153,14 @@ func (s server) handleModels(writer http.ResponseWriter, request *http.Request) 
 }
 
 func (s server) handleResponses(writer http.ResponseWriter, request *http.Request) {
+	s.handleExecution(writer, request)
+}
+
+func (s server) handleRuns(writer http.ResponseWriter, request *http.Request) {
+	s.handleExecution(writer, request)
+}
+
+func (s server) handleExecution(writer http.ResponseWriter, request *http.Request) {
 	defer request.Body.Close()
 
 	var payload ResponseRequest

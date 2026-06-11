@@ -72,6 +72,7 @@ Current implemented endpoints:
 - `POST /v1/responses`
 - `GET /v1/responses/{response_id}`
 - `POST /v1/memory/query`
+- `POST /v1/runs`
 
 Try the bundled local model:
 
@@ -114,6 +115,10 @@ curl http://localhost:8080/v1/memory/query \
     "limit": 5
   }'
 ```
+
+The current `POST /v1/runs` path is a thin wrapper around the same execution
+flow used by `POST /v1/responses`. It currently accepts the same request body
+shape and returns the same JSON or SSE response shapes.
 
 The current runtime uses a model-routed adapter registry. The default registry
 currently exposes:

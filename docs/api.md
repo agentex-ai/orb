@@ -399,9 +399,60 @@ process. It is scoped retrieval, not a durable memory backend.
 `POST /v1/runs` should remain a higher-level runtime entrypoint for future
 orchestrated execution.
 
-The first implementation does not need to make `runs` feature-complete. It can
-begin as a reserved endpoint or a thin wrapper around `responses` when the
-runtime starts to expose more than plain model execution.
+The current implementation is a thin wrapper around `POST /v1/responses`.
+
+Current implementation example:
+
+```bash
+curl http://localhost:8080/v1/runs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "orb/example-text",
+    "input": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "hello run"
+          }
+        ]
+      }
+    ],
+    "memory": {
+      "enabled": true,
+      "scope": "workspace:runs"
+    }
+  }'
+```
+
+```json
+{
+  "id": "resp_run",
+  "object": "response",
+  "model": "orb/example-text",
+  "output": [
+    {
+      "type": "output_text",
+      "text": "Echo: hello run"
+    }
+  ],
+  "usage": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "total_tokens": 0
+  },
+  "runtime": {
+    "adapter": "echo",
+    "deployment": "local",
+    "memory_applied": true,
+    "status": "ready"
+  }
+}
+```
+
+Streaming requests on `POST /v1/runs` currently reuse the same SSE behavior as
+`POST /v1/responses`.
 
 ## Input Shape
 
@@ -471,6 +522,9 @@ server restarts.
 The current server also exposes `POST /v1/memory/query` with an in-memory
 memory store. Memory entries are created from non-stream response calls that
 set `memory.enabled=true` and a non-empty `memory.scope`.
+
+The current server also exposes `POST /v1/runs` as a thin wrapper around the
+same execution path used by `POST /v1/responses`, including streaming support.
 
 When `ORB_OPENAI_API_KEY` and `ORB_OPENAI_MODEL_ID` are configured, the runtime
 also exposes a hosted OpenAI-backed model as `orb/openai/<model-id>` by

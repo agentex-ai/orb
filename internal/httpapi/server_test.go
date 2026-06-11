@@ -282,6 +282,95 @@ func TestMemoryQueryRequiresScope(t *testing.T) {
 	}
 }
 
+func TestRunsReturnsEchoPayload(t *testing.T) {
+	body := []byte(`{
+		"model":"orb/example-text",
+		"input":[{"role":"user","content":[{"type":"input_text","text":"hello run"}]}],
+		"memory":{"enabled":true,"scope":"workspace:runs"}
+	}`)
+	request := httptest.NewRequest(http.MethodPost, "/v1/runs", bytes.NewReader(body))
+	recorder := httptest.NewRecorder()
+
+	NewServer().ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", recorder.Code)
+	}
+
+	var response ResponseEnvelope
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("expected valid JSON response: %v", err)
+	}
+
+	if response.Object != "response" || response.Model != "orb/example-text" {
+		t.Fatalf("unexpected run response payload: %#v", response)
+	}
+
+	if response.Runtime.Adapter != "echo" || !response.Runtime.MemoryApplied {
+		t.Fatalf("unexpected run runtime metadata: %#v", response.Runtime)
+	}
+
+	if len(response.Output) != 1 || response.Output[0].Text != "Echo: hello run" {
+		t.Fatalf("unexpected run output payload: %#v", response.Output)
+	}
+}
+
+func TestRunsStreamsOpenAIAdapterEvents(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/responses" {
+			t.Fatalf("expected /v1/responses, got %s", request.URL.Path)
+		}
+
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = writer.Write([]byte(strings.Join([]string{
+			"event: response.created",
+			`data: {"type":"response.created","response":{"id":"resp_run_stream"}}`,
+			"",
+			"event: response.output_text.delta",
+			`data: {"type":"response.output_text.delta","delta":"hello run"}`,
+			"",
+			"event: response.completed",
+			`data: {"type":"response.completed","response":{"id":"resp_run_stream","status":"completed"}}`,
+			"",
+		}, "\n")))
+	}))
+	defer upstream.Close()
+
+	service := orb.NewService(orb.ConfiguredRegistry(orb.RegistryConfig{
+		OpenAIBaseURL: upstream.URL + "/v1",
+		OpenAIAPIKey:  "test-key",
+		OpenAIModelID: "gpt-5-mini",
+		HTTPClient:    upstream.Client(),
+	}))
+
+	body := []byte(`{
+		"model":"orb/openai/gpt-5-mini",
+		"stream":true,
+		"input":[{"role":"user","content":[{"type":"input_text","text":"hello run stream"}]}]
+	}`)
+	request := httptest.NewRequest(http.MethodPost, "/v1/runs", bytes.NewReader(body))
+	recorder := httptest.NewRecorder()
+
+	NewServerWithService(service).ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", recorder.Code)
+	}
+
+	if contentType := recorder.Header().Get("Content-Type"); contentType != "text/event-stream" {
+		t.Fatalf("expected sse content type, got %q", contentType)
+	}
+
+	responseBody := recorder.Body.String()
+	if !strings.Contains(responseBody, "event: response.output_text.delta") {
+		t.Fatalf("expected response.output_text.delta event, got %s", responseBody)
+	}
+
+	if !strings.Contains(responseBody, `"delta":"hello run"`) {
+		t.Fatalf("expected run delta payload, got %s", responseBody)
+	}
+}
+
 func TestModelsIncludesConfiguredOpenAIModel(t *testing.T) {
 	service := orb.NewService(orb.ConfiguredRegistry(orb.RegistryConfig{
 		OpenAIAPIKey:  "test-key",
