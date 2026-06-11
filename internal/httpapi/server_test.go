@@ -846,7 +846,7 @@ func TestHarnessExperimentsCreateListAndFetch(t *testing.T) {
 		"experiment_id":"exp_private_memory_001",
 		"user_objective":{"primary":"balanced"},
 		"bundles":["core/exact_math","memory/scope_recall"],
-		"search_space":{"models":{"ids":["orb/example-text"]}}
+		"search_space":{"models":{"ids":["orb/example-text","orb/private-example-text"]},"memory":{"enabled":[false,true]}}
 	}`)
 
 	createRequest := httptest.NewRequest(http.MethodPost, "/api/v1/harness/experiments", bytes.NewReader(body))
@@ -867,11 +867,7 @@ func TestHarnessExperimentsCreateListAndFetch(t *testing.T) {
 	}
 
 	if created.State != "queued" || created.Objective != "balanced" || created.Progress != 0 {
-		t.Fatalf("unexpected experiment state: %#v", created)
-	}
-
-	if created.Artifacts["status_path"] != "/api/v1/harness/experiments/exp_private_memory_001" {
-		t.Fatalf("unexpected status path: %#v", created.Artifacts)
+		t.Fatalf("unexpected create state: %#v", created)
 	}
 
 	listRequest := httptest.NewRequest(http.MethodGet, "/api/v1/harness/experiments", nil)
@@ -891,6 +887,10 @@ func TestHarnessExperimentsCreateListAndFetch(t *testing.T) {
 		t.Fatalf("unexpected experiment list payload: %#v", listed)
 	}
 
+	if listed.Data[0].State != "completed" || listed.Data[0].Progress != 100 {
+		t.Fatalf("expected completed list state, got %#v", listed.Data[0])
+	}
+
 	getRequest := httptest.NewRequest(http.MethodGet, "/api/v1/harness/experiments/exp_private_memory_001", nil)
 	getRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(getRecorder, getRequest)
@@ -904,8 +904,97 @@ func TestHarnessExperimentsCreateListAndFetch(t *testing.T) {
 		t.Fatalf("expected valid get JSON response: %v", err)
 	}
 
-	if fetched.ExperimentID != created.ExperimentID || fetched.State != "queued" {
+	if fetched.ExperimentID != created.ExperimentID || fetched.State != "completed" {
 		t.Fatalf("unexpected fetched experiment payload: %#v", fetched)
+	}
+
+	if fetched.Summary["mode"] != "stub" || fetched.Summary["total_candidates"].(float64) != 4 {
+		t.Fatalf("unexpected summary payload: %#v", fetched.Summary)
+	}
+
+	if len(fetched.Results) != 1 || fetched.Results[0]["id"] != "cand_stub_0001" {
+		t.Fatalf("unexpected results payload: %#v", fetched.Results)
+	}
+
+	if fetched.Artifacts["report_path"] != "/api/v1/harness/experiments/exp_private_memory_001/artifacts/report" {
+		t.Fatalf("unexpected artifact paths: %#v", fetched.Artifacts)
+	}
+}
+
+func TestHarnessExperimentSummaryArtifactReturnsJSON(t *testing.T) {
+	handler := NewServer()
+	body := []byte(`{
+		"experiment_id":"exp_summary_001",
+		"user_objective":{"primary":"balanced"},
+		"bundles":["core/exact_math"],
+		"search_space":{"models":{"ids":["orb/example-text","orb/private-example-text"]}}
+	}`)
+
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/v1/harness/experiments", bytes.NewReader(body))
+	createRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(createRecorder, createRequest)
+
+	if createRecorder.Code != http.StatusAccepted {
+		t.Fatalf("expected create status 202, got %d", createRecorder.Code)
+	}
+
+	artifactRequest := httptest.NewRequest(http.MethodGet, "/api/v1/harness/experiments/exp_summary_001/artifacts/summary", nil)
+	artifactRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(artifactRecorder, artifactRequest)
+
+	if artifactRecorder.Code != http.StatusOK {
+		t.Fatalf("expected artifact status 200, got %d", artifactRecorder.Code)
+	}
+
+	if contentType := artifactRecorder.Header().Get("Content-Type"); contentType != "application/json; charset=utf-8" {
+		t.Fatalf("expected json content type, got %q", contentType)
+	}
+
+	var summary map[string]any
+	if err := json.Unmarshal(artifactRecorder.Body.Bytes(), &summary); err != nil {
+		t.Fatalf("expected valid summary JSON: %v", err)
+	}
+
+	if summary["object"] != "harness.summary" || summary["mode"] != "stub" {
+		t.Fatalf("unexpected summary artifact payload: %#v", summary)
+	}
+
+	if summary["total_candidates"].(float64) != 2 {
+		t.Fatalf("unexpected total candidate count: %#v", summary)
+	}
+}
+
+func TestHarnessExperimentReportArtifactReturnsMarkdown(t *testing.T) {
+	handler := NewServer()
+	body := []byte(`{
+		"experiment_id":"exp_report_001",
+		"user_objective":{"primary":"balanced"},
+		"bundles":["core/exact_math","memory/scope_recall"]
+	}`)
+
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/v1/harness/experiments", bytes.NewReader(body))
+	createRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(createRecorder, createRequest)
+
+	if createRecorder.Code != http.StatusAccepted {
+		t.Fatalf("expected create status 202, got %d", createRecorder.Code)
+	}
+
+	reportRequest := httptest.NewRequest(http.MethodGet, "/api/v1/harness/experiments/exp_report_001/artifacts/report", nil)
+	reportRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(reportRecorder, reportRequest)
+
+	if reportRecorder.Code != http.StatusOK {
+		t.Fatalf("expected report status 200, got %d", reportRecorder.Code)
+	}
+
+	if contentType := reportRecorder.Header().Get("Content-Type"); contentType != "text/markdown; charset=utf-8" {
+		t.Fatalf("expected markdown content type, got %q", contentType)
+	}
+
+	bodyText := reportRecorder.Body.String()
+	if !strings.Contains(bodyText, "# Harness Report") || !strings.Contains(bodyText, "exp_report_001") {
+		t.Fatalf("unexpected report artifact body: %s", bodyText)
 	}
 }
 
@@ -969,10 +1058,10 @@ func TestHarnessExperimentNotFound(t *testing.T) {
 	}
 }
 
-func TestHarnessExperimentArtifactNotMaterialized(t *testing.T) {
+func TestHarnessExperimentUnknownArtifactReturnsNotFound(t *testing.T) {
 	handler := NewServer()
 	body := []byte(`{
-		"experiment_id":"exp_artifact_001",
+		"experiment_id":"exp_unknown_artifact_001",
 		"user_objective":{"primary":"balanced"},
 		"bundles":["core/exact_math"]
 	}`)
@@ -985,7 +1074,7 @@ func TestHarnessExperimentArtifactNotMaterialized(t *testing.T) {
 		t.Fatalf("expected create status 202, got %d", createRecorder.Code)
 	}
 
-	artifactRequest := httptest.NewRequest(http.MethodGet, "/api/v1/harness/experiments/exp_artifact_001/artifacts/report", nil)
+	artifactRequest := httptest.NewRequest(http.MethodGet, "/api/v1/harness/experiments/exp_unknown_artifact_001/artifacts/not-real", nil)
 	artifactRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(artifactRecorder, artifactRequest)
 
@@ -995,9 +1084,5 @@ func TestHarnessExperimentArtifactNotMaterialized(t *testing.T) {
 
 	if !strings.Contains(artifactRecorder.Body.String(), `"artifact_not_found"`) {
 		t.Fatalf("expected artifact_not_found error, got %s", artifactRecorder.Body.String())
-	}
-
-	if !strings.Contains(artifactRecorder.Body.String(), `"state":"queued"`) {
-		t.Fatalf("expected queued state detail, got %s", artifactRecorder.Body.String())
 	}
 }

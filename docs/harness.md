@@ -5,10 +5,14 @@ runtime surface.
 
 ## What Orb Harness Is
 
-Orb Harness is the planned repeatable experiment and evaluation layer for
+Orb Harness is the repeatable experiment and evaluation layer taking shape for
 Agentex Orb. It is intended to compare runtime candidates, model routes,
 memory strategies, and policy configurations against consistent bundles of
 checks.
+
+The current repository already includes an early in-memory control-plane stub
+for bundle discovery, experiment registration, experiment status fetches, and
+placeholder artifact materialization.
 
 ## Planned Responsibilities
 
@@ -33,11 +37,11 @@ runtime surface as an evaluation and control plane.
 
 ## Early Shape
 
-Early harness work will likely center on:
+Early harness work centers on:
 
 - bundle definitions,
 - experiment specs,
-- runner and orchestration interfaces,
+- a control-plane API and runner interfaces,
 - scoring and promotion policy,
 - report and artifact generation.
 
@@ -49,4 +53,7 @@ Early harness work will likely center on:
 
 ## Status
 
-Planned, not implemented.
+Early control-plane skeleton implemented.
+
+Real bundle execution, candidate scoring, persistence, and apply/promotion
+workflows are still planned.

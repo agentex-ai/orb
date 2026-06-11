@@ -84,7 +84,11 @@ Current implemented endpoints:
 - `GET /v1/responses/{response_id}`
 - `POST /v1/memory/query`
 - `POST /v1/runs`
-
+- `GET /api/v1/harness/bundles`
+- `POST /api/v1/harness/experiments`
+- `GET /api/v1/harness/experiments`
+- `GET /api/v1/harness/experiments/{experiment_id}`
+- `GET /api/v1/harness/experiments/{experiment_id}/artifacts/{artifact}`
 Try the bundled local model:
 
 ```bash
@@ -237,10 +241,11 @@ Early implementation skeleton.
 This repository currently exists to establish the public home for Agentex Orb
 and to document its intended direction. It now includes a minimal HTTP service,
 an adapter-backed runtime skeleton, bundled local/private echo adapters, a real
-hosted OpenAI adapter with streaming support, and an upstream private HTTP
-adapter with model discovery and streaming pass-through. It does not yet
-contain production runtime code or a full harness and evaluation plane.
-
+hosted OpenAI adapter with streaming support, an upstream private HTTP adapter
+with model discovery and streaming pass-through, and an early in-memory harness
+control-plane stub that can register experiments and materialize placeholder
+artifacts. It does not yet contain production runtime code or a real harness
+execution and promotion plane.
 ## License
 
 MIT

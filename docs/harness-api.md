@@ -1,7 +1,8 @@
 # Harness Control Plane Draft
 
-This document outlines the first planned control-plane API shape for Agentex Orb
-Harness.
+This document outlines the current control-plane shape for Agentex Orb
+Harness, including the early stub behavior already implemented in this
+repository.
 
 The inference API should remain focused on `/v1/models`, `/v1/responses`,
 `/v1/memory/query`, and `/v1/runs`.
@@ -24,7 +25,7 @@ The planned harness control plane should live under:
 - Return enough detail for a UI, CLI, or CI workflow to operate against the
   same control plane.
 
-## Planned Endpoints
+## Endpoints
 
 - `GET /api/v1/harness/bundles`
 - `POST /api/v1/harness/experiments`
@@ -32,6 +33,9 @@ The planned harness control plane should live under:
 - `GET /api/v1/harness/experiments/{experiment_id}`
 - `GET /api/v1/harness/experiments/{experiment_id}/artifacts/{artifact}`
 - `POST /api/v1/harness/candidates/{candidate_id}/apply`
+
+The first five are implemented today as an in-memory stub control plane.
+`POST /api/v1/harness/candidates/{candidate_id}/apply` remains planned.
 
 ## Bundles
 
@@ -54,7 +58,7 @@ Example response:
     {
       "id": "memory/scope_recall",
       "name": "Memory Scope Recall",
-      "category": "runtime",
+      "category": "memory",
       "description": "Checks scoped memory retrieval and reuse behavior."
     }
   ]
@@ -63,8 +67,13 @@ Example response:
 
 ## Experiments
 
-`POST /api/v1/harness/experiments` should start a new harness experiment from a
-spec document.
+`POST /api/v1/harness/experiments` starts a new harness experiment from a spec
+document.
+
+In the current stub implementation, Orb returns `202 Accepted` with an initial
+queued snapshot, then materializes placeholder artifacts immediately in the
+same process. A following `GET` will usually observe the experiment in the
+completed state.
 
 Example accepted response:
 
@@ -76,13 +85,25 @@ Example accepted response:
   "status": "Experiment accepted",
   "progress": 0,
   "created_at": "2026-06-11T14:00:00Z",
+  "updated_at": "2026-06-11T14:00:00Z",
+  "objective": "balanced",
+  "bundles": [
+    "core/exact_math",
+    "memory/scope_recall"
+  ],
   "artifacts": {
-    "status_path": "/api/v1/harness/experiments/private-routing-memory-sweep-20260611"
+    "status_path": "/api/v1/harness/experiments/private-routing-memory-sweep-20260611",
+    "plan_path": "/api/v1/harness/experiments/private-routing-memory-sweep-20260611/artifacts/plan",
+    "summary_path": "/api/v1/harness/experiments/private-routing-memory-sweep-20260611/artifacts/summary",
+    "promotion_path": "/api/v1/harness/experiments/private-routing-memory-sweep-20260611/artifacts/promotion",
+    "pareto_front_path": "/api/v1/harness/experiments/private-routing-memory-sweep-20260611/artifacts/pareto_front",
+    "failures_path": "/api/v1/harness/experiments/private-routing-memory-sweep-20260611/artifacts/failures",
+    "report_path": "/api/v1/harness/experiments/private-routing-memory-sweep-20260611/artifacts/report"
   }
 }
 ```
 
-`GET /api/v1/harness/experiments` should list known experiments.
+`GET /api/v1/harness/experiments` lists known experiments.
 
 Example response:
 
@@ -92,79 +113,81 @@ Example response:
   "data": [
     {
       "experiment_id": "private-routing-memory-sweep-20260611",
-      "state": "running",
-      "status": "Evaluating candidate 8 of 24",
-      "progress": 33,
+      "state": "completed",
+      "status": "Experiment completed (stub)",
+      "progress": 100,
       "created_at": "2026-06-11T14:00:00Z",
-      "updated_at": "2026-06-11T14:07:12Z",
+      "updated_at": "2026-06-11T14:00:01Z",
       "objective": "balanced"
     }
   ]
 }
 ```
 
-`GET /api/v1/harness/experiments/{experiment_id}` should return the current
-status snapshot plus results when available.
+`GET /api/v1/harness/experiments/{experiment_id}` returns the current status
+snapshot plus results when available.
 
 Example response shape:
 
 ```json
 {
   "experiment_id": "private-routing-memory-sweep-20260611",
+  "object": "harness.experiment",
   "state": "completed",
-  "status": "Experiment completed",
+  "status": "Experiment completed (stub)",
   "progress": 100,
   "created_at": "2026-06-11T14:00:00Z",
-  "updated_at": "2026-06-11T14:15:41Z",
+  "updated_at": "2026-06-11T14:00:01Z",
   "objective": "balanced",
+  "bundles": [
+    "core/exact_math",
+    "memory/scope_recall"
+  ],
   "artifacts": {
     "plan_path": "/api/v1/harness/experiments/private-routing-memory-sweep-20260611/artifacts/plan",
     "summary_path": "/api/v1/harness/experiments/private-routing-memory-sweep-20260611/artifacts/summary",
     "promotion_path": "/api/v1/harness/experiments/private-routing-memory-sweep-20260611/artifacts/promotion",
+    "pareto_front_path": "/api/v1/harness/experiments/private-routing-memory-sweep-20260611/artifacts/pareto_front",
+    "failures_path": "/api/v1/harness/experiments/private-routing-memory-sweep-20260611/artifacts/failures",
     "report_path": "/api/v1/harness/experiments/private-routing-memory-sweep-20260611/artifacts/report"
   },
   "summary": {
+    "object": "harness.summary",
+    "mode": "stub",
+    "status": "completed",
     "total_candidates": 24,
-    "successful_candidates": 18,
-    "failed_candidates": 6,
-    "strict_promoted": 2,
-    "rejected": 16,
-    "duration_seconds": 941
+    "successful_candidates": 1,
+    "failed_candidates": 0,
+    "strict_promoted": 1,
+    "rejected": 23,
+    "duration_seconds": 0
   },
   "results": [
     {
-      "id": "cand_0008",
-      "score": 0.91,
-      "quality_score": 0.89,
-      "decode_tps": 82.4,
-      "ttft_ms": 1180,
+      "id": "cand_stub_0001",
+      "score": 0.82,
+      "quality_score": 0.82,
       "strict_pass": true,
       "promotion": "strict",
       "config": {
-        "model": "orb/private/qwen3-32b",
-        "routing_policy": "provider_fallback",
+        "models": {
+          "ids": "orb/private/qwen3-32b"
+        },
         "memory": {
           "enabled": true,
-          "scope": "workspace:support",
-          "top_k": 5
+          "scope": "workspace:support"
         }
       }
     }
   ],
-  "failures": [
-    {
-      "id": "cand_0004",
-      "stage": "execution",
-      "error": "upstream private runtime timed out"
-    }
-  ]
+  "failures": []
 }
 ```
 
 ## Artifacts
 
-`GET /api/v1/harness/experiments/{experiment_id}/artifacts/{artifact}` should
-return a materialized experiment artifact.
+`GET /api/v1/harness/experiments/{experiment_id}/artifacts/{artifact}` returns
+a materialized experiment artifact.
 
 Suggested artifact keys:
 
@@ -175,7 +198,17 @@ Suggested artifact keys:
 - `failures`
 - `report`
 
-The first five should normally be JSON. `report` should normally be Markdown.
+In the current stub implementation, the first five return JSON and `report`
+returns Markdown.
+
+The materialized payloads are currently placeholders:
+
+- `plan`: stub plan summary with estimated candidates and a representative configuration
+- `summary`: stub aggregate counts
+- `promotion`: stub winning candidate description
+- `pareto_front`: stub list with one promoted candidate
+- `failures`: stub list, currently empty on successful materialization
+- `report`: Markdown report describing the placeholder run
 
 ## Candidate Apply
 
@@ -238,4 +271,8 @@ workflows.
 
 ## Status
 
-Planned, not implemented.
+Partially implemented.
+
+Bundle discovery, experiment registration, experiment fetch/list, and stub
+artifact materialization are implemented in-memory. Real runtime evaluation,
+candidate apply, persistence, and asynchronous orchestration are still planned.
