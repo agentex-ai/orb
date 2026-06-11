@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -143,5 +144,68 @@ func TestServiceGetResponseReturnsNotFoundForUnknownResponse(t *testing.T) {
 
 	if apiErr.Details["persistence"] != "memory_only" {
 		t.Fatalf("expected memory_only detail, got %#v", apiErr.Details)
+	}
+}
+
+func TestServiceQueryMemoryReturnsScopedMatches(t *testing.T) {
+	service := NewService(DefaultRegistry())
+
+	_, err := service.CreateResponse(context.Background(), Request{
+		Model: "orb/example-text",
+		Input: []InputMessage{{Role: "user", Content: []InputContent{{Type: "input_text", Text: "deployment note alpha"}}}},
+		Memory: &MemoryRequest{
+			Enabled: true,
+			Scope:   "workspace:docs",
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected create success, got %v", err)
+	}
+
+	_, err = service.CreateResponse(context.Background(), Request{
+		Model: "orb/example-text",
+		Input: []InputMessage{{Role: "user", Content: []InputContent{{Type: "input_text", Text: "unrelated sales note"}}}},
+		Memory: &MemoryRequest{
+			Enabled: true,
+			Scope:   "workspace:other",
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected second create success, got %v", err)
+	}
+
+	results, err := service.QueryMemory(context.Background(), MemoryQuery{
+		Scope: "workspace:docs",
+		Query: "alpha",
+		Limit: 3,
+	})
+	if err != nil {
+		t.Fatalf("expected memory query success, got %v", err)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("expected one memory result, got %#v", results)
+	}
+
+	if results[0].Scope != "workspace:docs" || results[0].Model != "orb/example-text" {
+		t.Fatalf("unexpected memory result payload: %#v", results[0])
+	}
+
+	if results[0].InputText != "deployment note alpha" || !strings.Contains(results[0].OutputText, "Echo: deployment note alpha") {
+		t.Fatalf("unexpected memory texts: %#v", results[0])
+	}
+}
+
+func TestServiceQueryMemoryRequiresScope(t *testing.T) {
+	service := NewService(DefaultRegistry())
+
+	_, err := service.QueryMemory(context.Background(), MemoryQuery{})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+
+	apiErr, ok := err.(*Error)
+	if !ok || apiErr.Code != "invalid_argument" {
+		t.Fatalf("unexpected error: %#v", err)
 	}
 }

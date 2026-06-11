@@ -71,6 +71,7 @@ Current implemented endpoints:
 - `GET /v1/models`
 - `POST /v1/responses`
 - `GET /v1/responses/{response_id}`
+- `POST /v1/memory/query`
 
 Try the bundled local model:
 
@@ -97,6 +98,22 @@ Current response retrieval stores completed non-stream responses in memory for
 the life of the current server process. `GET /v1/responses/{response_id}` can
 read those responses back until the process restarts. Streamed responses are not
 stored yet.
+
+The current memory query path is also in-memory. When a non-stream request is
+sent with `"memory":{"enabled":true,"scope":"..."}`, Orb stores the request
+input and response output as a lightweight memory entry for that scope.
+
+Example memory query after creating one or more memory-enabled responses:
+
+```bash
+curl http://localhost:8080/v1/memory/query \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scope": "workspace:test",
+    "query": "hello",
+    "limit": 5
+  }'
+```
 
 The current runtime uses a model-routed adapter registry. The default registry
 currently exposes:

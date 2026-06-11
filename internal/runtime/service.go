@@ -13,6 +13,8 @@ type Service struct {
 	registry    *Registry
 	responsesMu sync.RWMutex
 	responses   map[string]Response
+	memoriesMu  sync.RWMutex
+	memories    []MemoryResult
 }
 
 type Adapter interface {
@@ -57,6 +59,22 @@ type InputContent struct {
 type MemoryRequest struct {
 	Enabled bool
 	Scope   string
+}
+
+type MemoryQuery struct {
+	Scope string
+	Query string
+	Limit int
+}
+
+type MemoryResult struct {
+	ID         string
+	Object     string
+	Scope      string
+	ResponseID string
+	Model      string
+	InputText  string
+	OutputText string
 }
 
 type Response struct {
@@ -154,6 +172,7 @@ func (s *Service) CreateResponse(ctx context.Context, request Request) (Response
 	}
 
 	s.storeResponse(response)
+	s.storeMemory(request, response)
 
 	return response, nil
 }
@@ -208,6 +227,47 @@ func (s *Service) GetResponse(_ context.Context, responseID string) (Response, e
 	}
 
 	return cloneResponse(response), nil
+}
+
+func (s *Service) QueryMemory(_ context.Context, query MemoryQuery) ([]MemoryResult, error) {
+	scope := strings.TrimSpace(query.Scope)
+	if scope == "" {
+		return nil, &Error{
+			Code:       "invalid_argument",
+			Message:    "scope is required",
+			Details:    map[string]any{"field": "scope"},
+			StatusCode: http.StatusBadRequest,
+		}
+	}
+
+	limit := query.Limit
+	if limit <= 0 {
+		limit = 5
+	}
+
+	needle := strings.ToLower(strings.TrimSpace(query.Query))
+
+	s.memoriesMu.RLock()
+	defer s.memoriesMu.RUnlock()
+
+	results := make([]MemoryResult, 0, min(limit, len(s.memories)))
+	for i := len(s.memories) - 1; i >= 0 && len(results) < limit; i-- {
+		item := s.memories[i]
+		if item.Scope != scope {
+			continue
+		}
+
+		if needle != "" {
+			haystack := strings.ToLower(item.InputText + "\n" + item.OutputText)
+			if !strings.Contains(haystack, needle) {
+				continue
+			}
+		}
+
+		results = append(results, cloneMemoryResult(item))
+	}
+
+	return results, nil
 }
 
 func validateRequest(request Request) error {
@@ -309,6 +369,31 @@ func (s *Service) storeResponse(response Response) {
 	s.responsesMu.Unlock()
 }
 
+func (s *Service) storeMemory(request Request, response Response) {
+	if s == nil || request.Memory == nil || !request.Memory.Enabled {
+		return
+	}
+
+	scope := strings.TrimSpace(request.Memory.Scope)
+	if scope == "" {
+		return
+	}
+
+	item := MemoryResult{
+		ID:         "mem_" + response.ID,
+		Object:     "memory_entry",
+		Scope:      scope,
+		ResponseID: response.ID,
+		Model:      response.Model,
+		InputText:  joinedInputText(request.Input),
+		OutputText: joinedOutputText(response.Output),
+	}
+
+	s.memoriesMu.Lock()
+	s.memories = append(s.memories, item)
+	s.memoriesMu.Unlock()
+}
+
 func cloneModels(models []Model) []Model {
 	if len(models) == 0 {
 		return nil
@@ -355,4 +440,46 @@ func cloneResponse(response Response) Response {
 		cloned.Output = append([]OutputItem(nil), response.Output...)
 	}
 	return cloned
+}
+
+func cloneMemoryResult(item MemoryResult) MemoryResult {
+	return item
+}
+
+func joinedInputText(messages []InputMessage) string {
+	parts := make([]string, 0)
+	for _, message := range messages {
+		for _, content := range message.Content {
+			if content.Type != "input_text" {
+				continue
+			}
+			text := strings.TrimSpace(content.Text)
+			if text == "" {
+				continue
+			}
+			parts = append(parts, text)
+		}
+	}
+
+	return strings.Join(parts, "\n")
+}
+
+func joinedOutputText(items []OutputItem) string {
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		text := strings.TrimSpace(item.Text)
+		if text == "" {
+			continue
+		}
+		parts = append(parts, text)
+	}
+
+	return strings.Join(parts, "\n")
+}
+
+func min(a int, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

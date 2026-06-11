@@ -223,6 +223,65 @@ func TestResponseByIDRejectsBlankIdentifier(t *testing.T) {
 	}
 }
 
+func TestMemoryQueryReturnsScopedMatches(t *testing.T) {
+	handler := NewServer()
+
+	createBody := []byte(`{
+		"model":"orb/example-text",
+		"input":[{"role":"user","content":[{"type":"input_text","text":"deployment note alpha"}]}],
+		"memory":{"enabled":true,"scope":"workspace:docs"}
+	}`)
+	createRequest := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(createBody))
+	createRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(createRecorder, createRequest)
+
+	if createRecorder.Code != http.StatusOK {
+		t.Fatalf("expected create status 200, got %d", createRecorder.Code)
+	}
+
+	queryBody := []byte(`{
+		"scope":"workspace:docs",
+		"query":"alpha",
+		"limit":5
+	}`)
+	request := httptest.NewRequest(http.MethodPost, "/v1/memory/query", bytes.NewReader(queryBody))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", recorder.Code)
+	}
+
+	var response MemoryQueryResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("expected valid JSON response: %v", err)
+	}
+
+	if response.Object != "list" || len(response.Data) != 1 {
+		t.Fatalf("unexpected memory query payload: %#v", response)
+	}
+
+	if response.Data[0].Scope != "workspace:docs" || response.Data[0].InputText != "deployment note alpha" {
+		t.Fatalf("unexpected memory item: %#v", response.Data[0])
+	}
+}
+
+func TestMemoryQueryRequiresScope(t *testing.T) {
+	body := []byte(`{"query":"alpha"}`)
+	request := httptest.NewRequest(http.MethodPost, "/v1/memory/query", bytes.NewReader(body))
+	recorder := httptest.NewRecorder()
+
+	NewServer().ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", recorder.Code)
+	}
+
+	if !strings.Contains(recorder.Body.String(), `"scope is required"`) {
+		t.Fatalf("expected scope validation error, got %s", recorder.Body.String())
+	}
+}
+
 func TestModelsIncludesConfiguredOpenAIModel(t *testing.T) {
 	service := orb.NewService(orb.ConfiguredRegistry(orb.RegistryConfig{
 		OpenAIAPIKey:  "test-key",

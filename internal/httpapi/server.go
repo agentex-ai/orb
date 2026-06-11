@@ -50,6 +50,27 @@ type MemoryRequest struct {
 	Scope   string `json:"scope,omitempty"`
 }
 
+type MemoryQueryRequest struct {
+	Scope string `json:"scope"`
+	Query string `json:"query,omitempty"`
+	Limit int    `json:"limit,omitempty"`
+}
+
+type MemoryQueryResponse struct {
+	Object string       `json:"object"`
+	Data   []MemoryItem `json:"data"`
+}
+
+type MemoryItem struct {
+	ID         string `json:"id"`
+	Object     string `json:"object"`
+	Scope      string `json:"scope"`
+	ResponseID string `json:"response_id"`
+	Model      string `json:"model"`
+	InputText  string `json:"input_text,omitempty"`
+	OutputText string `json:"output_text,omitempty"`
+}
+
 type ResponseEnvelope struct {
 	ID      string       `json:"id"`
 	Object  string       `json:"object"`
@@ -105,6 +126,7 @@ func NewServerWithService(service *orb.Service) http.Handler {
 	mux.HandleFunc("GET /v1/models", api.handleModels)
 	mux.HandleFunc("POST /v1/responses", api.handleResponses)
 	mux.HandleFunc("GET /v1/responses/{response_id}", api.handleResponseByID)
+	mux.HandleFunc("POST /v1/memory/query", api.handleMemoryQuery)
 	return mux
 }
 
@@ -236,6 +258,34 @@ func (s server) handleResponseByID(writer http.ResponseWriter, request *http.Req
 	})
 }
 
+func (s server) handleMemoryQuery(writer http.ResponseWriter, request *http.Request) {
+	defer request.Body.Close()
+
+	var payload MemoryQueryRequest
+	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+		writeError(writer, http.StatusBadRequest, APIError{
+			Code:    "invalid_argument",
+			Message: "request body must be valid JSON",
+		})
+		return
+	}
+
+	results, err := s.service.QueryMemory(request.Context(), orb.MemoryQuery{
+		Scope: payload.Scope,
+		Query: payload.Query,
+		Limit: payload.Limit,
+	})
+	if err != nil {
+		writeServiceError(writer, err)
+		return
+	}
+
+	writeJSON(writer, http.StatusOK, MemoryQueryResponse{
+		Object: "list",
+		Data:   toHTTPMemoryItems(results),
+	})
+}
+
 func writeSSEHeaders(writer http.ResponseWriter) {
 	headers := writer.Header()
 	headers.Set("Content-Type", "text/event-stream")
@@ -352,4 +402,21 @@ func toHTTPOutput(items []orb.OutputItem) []OutputItem {
 	}
 
 	return output
+}
+
+func toHTTPMemoryItems(items []orb.MemoryResult) []MemoryItem {
+	result := make([]MemoryItem, 0, len(items))
+	for _, item := range items {
+		result = append(result, MemoryItem{
+			ID:         item.ID,
+			Object:     item.Object,
+			Scope:      item.Scope,
+			ResponseID: item.ResponseID,
+			Model:      item.Model,
+			InputText:  item.InputText,
+			OutputText: item.OutputText,
+		})
+	}
+
+	return result
 }

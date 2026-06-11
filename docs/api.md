@@ -348,8 +348,9 @@ When a response is missing, Orb returns:
 used directly when an application wants memory access without a full model
 execution.
 
-This endpoint should remain optional from an implementation standpoint, but it
-is useful to reserve early because memory is part of Orb's product boundary.
+The current implementation stores lightweight memory entries in process memory
+when a non-stream `POST /v1/responses` request is sent with
+`"memory":{"enabled":true,"scope":"..."}`.
 
 Example request:
 
@@ -360,6 +361,38 @@ Example request:
   "limit": 5
 }
 ```
+
+Current implementation example:
+
+```bash
+curl http://localhost:8080/v1/memory/query \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scope": "workspace:test",
+    "query": "hello",
+    "limit": 5
+  }'
+```
+
+```json
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "mem_resp_123",
+      "object": "memory_entry",
+      "scope": "workspace:test",
+      "response_id": "resp_123",
+      "model": "orb/example-text",
+      "input_text": "hello orb",
+      "output_text": "Echo: hello orb"
+    }
+  ]
+}
+```
+
+This is currently a lightweight in-memory store tied to the running Orb
+process. It is scoped retrieval, not a durable memory backend.
 
 ### Runs
 
@@ -434,6 +467,10 @@ The current HTTP server also exposes `GET /v1/responses/{response_id}` with an
 in-memory response store. Responses created through non-stream `POST
 /v1/responses` calls can be retrieved from the same running process until the
 server restarts.
+
+The current server also exposes `POST /v1/memory/query` with an in-memory
+memory store. Memory entries are created from non-stream response calls that
+set `memory.enabled=true` and a non-empty `memory.scope`.
 
 When `ORB_OPENAI_API_KEY` and `ORB_OPENAI_MODEL_ID` are configured, the runtime
 also exposes a hosted OpenAI-backed model as `orb/openai/<model-id>` by
