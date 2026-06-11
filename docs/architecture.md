@@ -12,6 +12,8 @@ implementation-specific decisions are locked in.
 - Support hosted, private, and self-managed model backends.
 - Add optional memory and context augmentation around model calls.
 - Normalize provider differences through adapter interfaces.
+- Leave room for repeatable evaluation harnesses, scoring, and promotion
+  workflows.
 - Leave room for policy enforcement, telemetry, and usage accounting.
 
 ## System Boundary
@@ -53,6 +55,15 @@ state, retrieved memories, or application-scoped conversation history.
 This layer should support guardrails, response shaping, redaction, validation,
 usage accounting, and future workflow hooks.
 
+### Harness and Evaluation Layer
+
+Orb should eventually support repeatable evaluation harnesses that can run
+bundled checks, benchmarks, and promotion gates against candidate models,
+routing policies, memory strategies, and private deployments. This layer should
+be able to reuse the same Orb-compatible API surface while also managing
+experiment specs, baseline comparisons, scoring, reports, and harness-managed
+runtime processes when needed.
+
 ### Telemetry and Observability
 
 Orb should record runtime metadata needed for debugging, performance
@@ -88,5 +99,5 @@ registry, bundled local and private echo adapters, a hosted OpenAI adapter, and
 an upstream private HTTP adapter with model discovery.
 
 Implementation details such as storage backends, memory architecture,
-deployment model, and broader runtime contracts remain open and should keep
-evolving in follow-up design work.
+deployment model, broader runtime contracts, and the harness control plane
+remain open and should keep evolving in follow-up design work.

@@ -506,6 +506,11 @@ The following items should be left open until implementation planning:
 - memory backend schema,
 - API compatibility with any external provider wire format.
 
+A future harness or control plane may sit beside this execution API rather than
+inside the first `/v1` runtime surface. That plane would be responsible for
+experiment orchestration, scoring, artifact reporting, and promotion decisions,
+while the `/v1` API remains the inference and runtime contract.
+
 ## Current Status
 
 Early implementation draft.

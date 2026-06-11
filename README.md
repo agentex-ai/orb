@@ -3,9 +3,10 @@
 Agentex Orb is the model runtime core for Agentex.
 
 Orb is planned as the unified runtime layer for AI APIs, private model deployment,
-memory-augmented execution, model routing, and extensible model adapters. It is
-intended to sit behind Agentex products and APIs as the place where model calls,
-runtime policy, context, memory, and adapter behavior come together.
+memory-augmented execution, model routing, extensible model adapters, and
+repeatable runtime evaluation harnesses. It is intended to sit behind Agentex
+products and APIs as the place where model calls, runtime policy, context,
+memory, adapter behavior, and runtime evaluation come together.
 
 ## What Orb Is
 
@@ -19,6 +20,8 @@ The long-term goal is to support:
 - Private and self-hosted model deployment.
 - Built-in memory and context augmentation.
 - Model routing and adapter-based provider integration.
+- Repeatable evaluation harnesses for runtime, model, memory, and policy
+  configurations.
 - Runtime hooks for post-processing, policy, telemetry, and future Agentex
   capabilities.
 
@@ -31,6 +34,8 @@ The long-term goal is to support:
   environments.
 - **Orb Memory**: optional memory-backed execution for applications that need
   persistent context.
+- **Orb Harness**: repeatable experiment and evaluation harnesses for runtime
+  candidates, memory configurations, routing policies, and promotion reporting.
 - **Orb Adapters**: provider and model integration points for first-party,
   third-party, and private models.
 
@@ -40,7 +45,9 @@ The long-term goal is to support:
 - [API Draft](docs/api.md)
 - [OpenAPI Spec](docs/openapi.yaml)
 - [Roadmap](docs/roadmap.md)
+- [Harness Direction](docs/harness.md)
 - [TypeScript SDK Skeleton](sdk/typescript/README.md)
+- [Python SDK Skeleton](sdk/python/README.md)
 
 ## Quick Start
 
@@ -212,6 +219,8 @@ Orb is expected to evolve around a small set of runtime responsibilities:
 - Normalize model and provider differences through adapters.
 - Route requests to hosted, private, or local model backends.
 - Add optional memory and context layers before execution.
+- Run repeatable harness experiments against model, routing, memory, and policy
+  candidates.
 - Apply post-processing, policy, usage tracking, and observability after
   execution.
 
@@ -228,7 +237,7 @@ and to document its intended direction. It now includes a minimal HTTP service,
 an adapter-backed runtime skeleton, bundled local/private echo adapters, a real
 hosted OpenAI adapter with streaming support, and an upstream private HTTP
 adapter with model discovery and streaming pass-through. It does not yet
-contain production runtime code.
+contain production runtime code or a full harness and evaluation plane.
 
 ## License
 

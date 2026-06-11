@@ -32,7 +32,18 @@ first usable Orb runtime.
   prompts.
 - Add runtime-level usage accounting and request tracing.
 
-## Phase 4: Hardening
+## Phase 4: Harness and Evaluation
+
+- Define reusable evaluation bundles for quality, instruction following, tool
+  use, latency, throughput, and resource-efficiency checks.
+- Add experiment specs for sweeping model, adapter, memory, routing, and policy
+  candidates.
+- Support baseline comparison, recommendation, scoring, and promotion
+  artifacts.
+- Support harness-managed runtime and server execution for Orb-compatible
+  endpoints.
+
+## Phase 5: Hardening
 
 - Improve deployment guidance for private environments.
 - Expand adapter coverage and routing strategy.
@@ -48,5 +59,5 @@ adapters, a hosted OpenAI adapter, and a private HTTP forwarding path with
 upstream model discovery.
 
 The next meaningful milestone is to keep tightening the runtime boundary,
-expanding provider coverage, and adding memory hooks plus operational
-hardening.
+expanding provider coverage, adding memory hooks, and then layering in harness
+workflows plus operational hardening.
