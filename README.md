@@ -40,6 +40,7 @@ The long-term goal is to support:
 - [API Draft](docs/api.md)
 - [OpenAPI Spec](docs/openapi.yaml)
 - [Roadmap](docs/roadmap.md)
+- [TypeScript SDK Skeleton](sdk/typescript/README.md)
 
 ## Quick Start
 
