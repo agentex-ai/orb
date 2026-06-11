@@ -41,6 +41,12 @@ Early harness work will likely center on:
 - scoring and promotion policy,
 - report and artifact generation.
 
+## Related Drafts
+
+- [Harness Experiment Spec Draft](harness-spec.md)
+- [Harness Control Plane Draft](harness-api.md)
+- [Example Private Routing Sweep Spec](../examples/harness/private-routing-memory-sweep.json)
+
 ## Status
 
 Planned, not implemented.

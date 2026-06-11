@@ -511,6 +511,11 @@ inside the first `/v1` runtime surface. That plane would be responsible for
 experiment orchestration, scoring, artifact reporting, and promotion decisions,
 while the `/v1` API remains the inference and runtime contract.
 
+See also:
+
+- [Harness Experiment Spec Draft](harness-spec.md)
+- [Harness Control Plane Draft](harness-api.md)
+
 ## Current Status
 
 Early implementation draft.

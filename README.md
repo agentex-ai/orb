@@ -46,6 +46,8 @@ The long-term goal is to support:
 - [OpenAPI Spec](docs/openapi.yaml)
 - [Roadmap](docs/roadmap.md)
 - [Harness Direction](docs/harness.md)
+- [Harness Experiment Spec Draft](docs/harness-spec.md)
+- [Harness Control Plane Draft](docs/harness-api.md)
 - [TypeScript SDK Skeleton](sdk/typescript/README.md)
 - [Python SDK Skeleton](sdk/python/README.md)
 

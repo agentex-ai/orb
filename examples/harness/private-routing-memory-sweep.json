@@ -1,0 +1,104 @@
+{
+  "experiment_id": "private-routing-memory-sweep-20260611",
+  "user_objective": {
+    "primary": "balanced",
+    "constraints": {
+      "min_quality_score": 0.85,
+      "strict_pass_required": true,
+      "quality_fallback": "baseline_usable",
+      "usable_quality_score": 0.7,
+      "quality_regression_policy": "baseline_floor",
+      "max_p50_latency_ms": 2500,
+      "max_error_rate": 0.02
+    }
+  },
+  "bundles": [
+    "core/exact_math",
+    "core/plain_language",
+    "memory/scope_recall",
+    "runtime/latency_short"
+  ],
+  "search_space": {
+    "models": {
+      "ids": [
+        "orb/private/qwen3-32b",
+        "orb/openai/gpt-5-mini"
+      ]
+    },
+    "routing": {
+      "policies": [
+        "direct",
+        "provider_fallback"
+      ]
+    },
+    "memory": {
+      "enabled": [
+        false,
+        true
+      ],
+      "scopes": [
+        "workspace:support"
+      ],
+      "top_k": [
+        3,
+        5
+      ]
+    },
+    "execution_settings": {
+      "max_output_tokens": [
+        128,
+        256
+      ],
+      "temperature": [
+        0.0,
+        0.2
+      ]
+    },
+    "harness": {
+      "prompt_sets": [
+        "support_short"
+      ],
+      "concurrency": [
+        1,
+        2
+      ],
+      "rounds": [
+        3
+      ],
+      "warmup_runs": [
+        1
+      ]
+    }
+  },
+  "execution": {
+    "base_url": "http://127.0.0.1:18080",
+    "preferred_language": "en",
+    "request_timeout_ms": 45000,
+    "benchmark": {
+      "max_tokens": 256,
+      "concurrency": 1,
+      "warmup": 1,
+      "runs": 5
+    },
+    "managed_server": {
+      "command": "go",
+      "args": [
+        "run",
+        "./cmd/orb"
+      ],
+      "workdir": ".",
+      "env": {
+        "ORB_ADDR": "127.0.0.1:18080",
+        "ORB_PRIVATE_BASE_URL": "http://127.0.0.1:19080"
+      },
+      "ready_url": "http://127.0.0.1:18080/v1/models",
+      "startup_timeout_ms": 30000
+    }
+  },
+  "evolution": {
+    "strategy": "grid",
+    "max_candidates": 48,
+    "early_stop_failures": 6,
+    "random_seed": 42
+  }
+}
