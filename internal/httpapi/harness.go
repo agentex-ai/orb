@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	orb "github.com/agentex-ai/orb/internal/runtime"
 )
 
 type HarnessBundle struct {
@@ -119,7 +122,11 @@ func (r *harnessRegistry) create(spec HarnessExperimentRequest) (*harnessExperim
 	return cloneHarnessExperimentState(state), true
 }
 
-func (r *harnessRegistry) runStub(experimentID string) error {
+func (r *harnessRegistry) runExperiment(service *orb.Service, experimentID string) error {
+	if service == nil {
+		return fmt.Errorf("harness runtime service is not configured")
+	}
+
 	r.mu.Lock()
 	state, exists := r.experiments[experimentID]
 	if !exists {
@@ -127,23 +134,23 @@ func (r *harnessRegistry) runStub(experimentID string) error {
 		return fmt.Errorf("experiment %q was not found", experimentID)
 	}
 	state.state = "running"
-	state.status = "Materializing stub artifacts"
+	state.status = "Running harness candidates"
 	state.progress = 25
 	state.updatedAt = time.Now().UTC()
 	snapshot := cloneHarnessExperimentState(state)
 	r.mu.Unlock()
 
-	artifacts, summary, results, failures, err := buildHarnessStubArtifacts(snapshot)
+	artifacts, summary, results, failures, err := buildHarnessRunArtifacts(service, snapshot)
 	if err != nil {
 		r.mu.Lock()
 		if state, exists = r.experiments[experimentID]; exists {
 			state.state = "failed"
-			state.status = "Harness stub materialization failed"
+			state.status = "Harness execution failed"
 			state.progress = 100
 			state.updatedAt = time.Now().UTC()
 			state.failures = []map[string]any{{
 				"id":    "stub_failure_001",
-				"stage": "materialization",
+				"stage": "execution",
 				"error": err.Error(),
 			}}
 		}
@@ -158,7 +165,7 @@ func (r *harnessRegistry) runStub(experimentID string) error {
 		state.results = results
 		state.failures = failures
 		state.state = "completed"
-		state.status = "Experiment completed (stub)"
+		state.status = "Experiment completed"
 		state.progress = 100
 		state.updatedAt = time.Now().UTC()
 	}
@@ -358,10 +365,10 @@ func (s server) handleHarnessCreateExperiment(writer http.ResponseWriter, reques
 		return
 	}
 
-	if err := s.harness.runStub(payload.ExperimentID); err != nil {
+	if err := s.harness.runExperiment(s.service, payload.ExperimentID); err != nil {
 		writeError(writer, http.StatusInternalServerError, APIError{
 			Code:    "experiment_failed",
-			Message: fmt.Sprintf("failed to materialize stub artifacts for experiment %q", payload.ExperimentID),
+			Message: fmt.Sprintf("failed to execute experiment %q", payload.ExperimentID),
 			Details: map[string]any{"experiment_id": payload.ExperimentID},
 		})
 		return
@@ -498,64 +505,107 @@ func buildHarnessArtifactPaths(experimentID string) map[string]string {
 	}
 }
 
-func buildHarnessStubArtifacts(state *harnessExperimentState) (map[string]harnessArtifact, map[string]any, []map[string]any, []map[string]any, error) {
-	candidateCount := estimateHarnessCandidateCount(state.spec.SearchSpace)
-	if candidateCount < 1 {
-		candidateCount = 1
+func buildHarnessRunArtifacts(service *orb.Service, state *harnessExperimentState) (map[string]harnessArtifact, map[string]any, []map[string]any, []map[string]any, error) {
+	if service == nil {
+		return nil, nil, nil, nil, fmt.Errorf("harness runtime service is not configured")
 	}
 
-	representativeConfig := buildRepresentativeConfig(state.spec.SearchSpace)
-	result := map[string]any{
-		"id":            "cand_stub_0001",
-		"score":         0.82,
-		"quality_score": 0.82,
-		"strict_pass":   true,
-		"promotion":     "strict",
-		"config":        representativeConfig,
+	startedAt := time.Now()
+	maxCandidates := harnessMaxCandidates(state.spec.Evolution)
+	candidateConfigs := expandHarnessCandidates(state.spec.SearchSpace, maxCandidates)
+	if len(candidateConfigs) == 0 {
+		candidateConfigs = []map[string]any{{}}
 	}
-	results := []map[string]any{result}
-	failures := []map[string]any{}
+
+	plannedCandidates := make([]map[string]any, 0, len(candidateConfigs))
+	results := make([]map[string]any, 0, len(candidateConfigs))
+	failures := make([]map[string]any, 0)
+	strictPromoted := 0
+	failedCandidates := 0
+
+	for index, candidateConfig := range candidateConfigs {
+		candidateID := fmt.Sprintf("cand_%04d", index+1)
+		modelID := harnessCandidateModelID(service, candidateConfig)
+		memoryEnabled, memoryScope := harnessCandidateMemoryConfig(candidateConfig, state.spec.ExperimentID, candidateID)
+
+		plannedCandidates = append(plannedCandidates, map[string]any{
+			"id":             candidateID,
+			"model":          modelID,
+			"memory_enabled": memoryEnabled,
+			"memory_scope":   memoryScope,
+			"config":         cloneMap(candidateConfig),
+		})
+
+		result, candidateFailures, executionFailed := evaluateHarnessCandidate(service, state, candidateID, candidateConfig)
+		results = append(results, result)
+		failures = append(failures, candidateFailures...)
+		if executionFailed {
+			failedCandidates++
+		}
+		if boolValue(result["strict_pass"]) {
+			strictPromoted++
+		}
+	}
+
+	sortHarnessResults(results)
+
+	totalCandidates := len(candidateConfigs)
+	rejected := maxInt(totalCandidates-strictPromoted, 0)
 	summary := map[string]any{
 		"object":                "harness.summary",
-		"mode":                  "stub",
+		"mode":                  "runner",
 		"status":                "completed",
-		"total_candidates":      candidateCount,
-		"successful_candidates": 1,
-		"failed_candidates":     0,
-		"strict_promoted":       1,
-		"rejected":              maxInt(candidateCount-1, 0),
-		"duration_seconds":      0,
+		"total_candidates":      totalCandidates,
+		"successful_candidates": totalCandidates - failedCandidates,
+		"failed_candidates":     failedCandidates,
+		"strict_promoted":       strictPromoted,
+		"rejected":              rejected,
+		"duration_seconds":      time.Since(startedAt).Seconds(),
 	}
 
+	topCandidate := map[string]any{}
+	if len(results) > 0 {
+		topCandidate = cloneMap(results[0])
+	}
+	topCandidateID := stringValue(topCandidate["id"])
+	topCandidateConfig, _ := topCandidate["config"].(map[string]any)
+	topCandidatePromotion := stringValue(topCandidate["promotion"])
+	topCandidateScore := floatValue(topCandidate["score"])
+
 	planPayload := map[string]any{
-		"experiment_id":        state.spec.ExperimentID,
-		"object":               "harness.plan",
-		"mode":                 "stub",
-		"status":               "materialized_stub",
-		"objective":            state.spec.UserObjective.Primary,
-		"bundles":              append([]string(nil), state.spec.Bundles...),
-		"estimated_candidates": candidateCount,
-		"search_space":         cloneMap(state.spec.SearchSpace),
-		"selected_candidate":   representativeConfig,
+		"experiment_id":      state.spec.ExperimentID,
+		"object":             "harness.plan",
+		"mode":               "runner",
+		"status":             "completed",
+		"objective":          state.spec.UserObjective.Primary,
+		"bundles":            append([]string(nil), state.spec.Bundles...),
+		"candidate_count":    totalCandidates,
+		"search_space":       cloneMap(state.spec.SearchSpace),
+		"planned_candidates": plannedCandidates,
 	}
 	promotionPayload := map[string]any{
 		"experiment_id": state.spec.ExperimentID,
 		"object":        "harness.promotion",
-		"mode":          "stub",
-		"candidate_id":  "cand_stub_0001",
-		"promotion":     "strict",
-		"score":         0.82,
-		"config":        representativeConfig,
+		"mode":          "runner",
+		"candidate_id":  topCandidateID,
+		"promotion":     topCandidatePromotion,
+		"score":         topCandidateScore,
+		"config":        cloneMap(topCandidateConfig),
+	}
+
+	paretoFront := cloneResultList(results)
+	if len(paretoFront) > 3 {
+		paretoFront = paretoFront[:3]
 	}
 	paretoFrontPayload := map[string]any{
 		"object": "list",
-		"data":   []map[string]any{result},
+		"data":   paretoFront,
 	}
 	failuresPayload := map[string]any{
 		"object": "list",
 		"data":   failures,
 	}
-	reportBody := []byte(buildHarnessStubReport(state, candidateCount, representativeConfig))
+	reportBody := []byte(buildHarnessRunReport(state, summary, topCandidate, failures))
 
 	artifacts := map[string]harnessArtifact{}
 	var err error
@@ -594,24 +644,454 @@ func marshalHarnessJSONArtifact(payload any) (harnessArtifact, error) {
 	}, nil
 }
 
-func buildHarnessStubReport(state *harnessExperimentState, candidateCount int, representativeConfig map[string]any) string {
+func buildHarnessRunReport(state *harnessExperimentState, summary map[string]any, topCandidate map[string]any, failures []map[string]any) string {
+	topCandidateID := stringValue(topCandidate["id"])
+	topCandidatePromotion := stringValue(topCandidate["promotion"])
+	topCandidateScore := floatValue(topCandidate["score"])
+	topCandidateConfig, _ := topCandidate["config"].(map[string]any)
+
 	return fmt.Sprintf(
 		"# Harness Report\n\n"+
-			"Experiment `%s` was materialized through the current stub runner.\n\n"+
-			"## Status\n\n"+
-			"- Mode: stub\n"+
+			"Experiment `%s` was evaluated through the current harness runner.\n\n"+
+			"## Summary\n\n"+
 			"- Objective: `%s`\n"+
-			"- Estimated candidates: `%d`\n"+
+			"- Mode: runner\n"+
+			"- Evaluated candidates: `%d`\n"+
+			"- Strict passes: `%d`\n"+
+			"- Rejected candidates: `%d`\n"+
+			"- Recorded failures: `%d`\n"+
 			"- Bundles: `%s`\n\n"+
-			"## Representative Candidate\n\n"+
+			"## Top Candidate\n\n"+
+			"- Candidate: `%s`\n"+
+			"- Promotion: `%s`\n"+
+			"- Score: `%.2f`\n\n"+
 			"```json\n%s\n```\n\n"+
-			"This report is a placeholder artifact for the harness control plane. It does not yet represent real bundle evaluation or live runtime scoring.\n",
+			"This is an early runner implementation that executes a small built-in bundle set against the live Orb runtime surface.\n",
 		state.spec.ExperimentID,
 		state.spec.UserObjective.Primary,
-		candidateCount,
+		intValue(summary["total_candidates"]),
+		intValue(summary["strict_promoted"]),
+		intValue(summary["rejected"]),
+		len(failures),
 		strings.Join(state.spec.Bundles, "`, `"),
-		mustFormatJSON(representativeConfig),
+		topCandidateID,
+		topCandidatePromotion,
+		topCandidateScore,
+		mustFormatJSON(topCandidateConfig),
 	)
+}
+
+func evaluateHarnessCandidate(service *orb.Service, state *harnessExperimentState, candidateID string, candidateConfig map[string]any) (map[string]any, []map[string]any, bool) {
+	startedAt := time.Now()
+	modelID := harnessCandidateModelID(service, candidateConfig)
+	memoryEnabled, memoryScope := harnessCandidateMemoryConfig(candidateConfig, state.spec.ExperimentID, candidateID)
+	bundleResults := make([]map[string]any, 0, len(state.spec.Bundles))
+	failures := make([]map[string]any, 0)
+	executionFailed := false
+	passedBundles := 0
+
+	for _, bundle := range state.spec.Bundles {
+		bundleResult, bundleFailures, bundleExecutionFailed := runHarnessBundle(service, state, candidateID, candidateConfig, bundle)
+		bundleResults = append(bundleResults, bundleResult)
+		failures = append(failures, bundleFailures...)
+		if boolValue(bundleResult["pass"]) {
+			passedBundles++
+		}
+		if bundleExecutionFailed {
+			executionFailed = true
+		}
+	}
+
+	qualityScore := 0.0
+	if len(state.spec.Bundles) > 0 {
+		qualityScore = float64(passedBundles) / float64(len(state.spec.Bundles))
+	}
+	strictPass := passedBundles == len(state.spec.Bundles)
+	promotion := "rejected"
+	if strictPass {
+		promotion = "strict"
+	}
+
+	return map[string]any{
+		"id":               candidateID,
+		"model":            modelID,
+		"score":            qualityScore,
+		"quality_score":    qualityScore,
+		"strict_pass":      strictPass,
+		"promotion":        promotion,
+		"memory_enabled":   memoryEnabled,
+		"memory_scope":     memoryScope,
+		"bundle_passes":    passedBundles,
+		"bundle_total":     len(state.spec.Bundles),
+		"duration_ms":      float64(time.Since(startedAt).Microseconds()) / 1000.0,
+		"execution_failed": executionFailed,
+		"config":           cloneMap(candidateConfig),
+		"bundle_results":   bundleResults,
+	}, failures, executionFailed
+}
+
+func runHarnessBundle(service *orb.Service, state *harnessExperimentState, candidateID string, candidateConfig map[string]any, bundle string) (map[string]any, []map[string]any, bool) {
+	modelID := harnessCandidateModelID(service, candidateConfig)
+	memoryRequest := harnessCandidateMemoryRequest(candidateConfig, state.spec.ExperimentID, candidateID)
+	settings := harnessCandidateSettings(candidateConfig)
+
+	switch bundle {
+	case "core/exact_math":
+		request := newHarnessRuntimeRequest(modelID, "2+3=5", memoryRequest, settings)
+		startedAt := time.Now()
+		response, err := service.CreateResponse(context.Background(), request)
+		durationMS := float64(time.Since(startedAt).Microseconds()) / 1000.0
+		if err != nil {
+			return harnessBundleExecutionFailure(bundle, durationMS, err), []map[string]any{newHarnessFailure(candidateID, bundle, "execution", err.Error())}, true
+		}
+		output := harnessFirstOutputText(response.Output)
+		pass := strings.Contains(output, "2+3=5")
+		message := ""
+		if !pass {
+			message = "expected output to contain 2+3=5"
+		}
+		return harnessBundleResult(bundle, pass, durationMS, message, map[string]any{
+			"output_text": output,
+		}), harnessBundleFailures(candidateID, bundle, message), false
+	case "core/plain_language":
+		request := newHarnessRuntimeRequest(modelID, "hello orb", memoryRequest, settings)
+		startedAt := time.Now()
+		response, err := service.CreateResponse(context.Background(), request)
+		durationMS := float64(time.Since(startedAt).Microseconds()) / 1000.0
+		if err != nil {
+			return harnessBundleExecutionFailure(bundle, durationMS, err), []map[string]any{newHarnessFailure(candidateID, bundle, "execution", err.Error())}, true
+		}
+		output := harnessFirstOutputText(response.Output)
+		pass := strings.TrimSpace(output) != ""
+		message := ""
+		if !pass {
+			message = "expected non-empty output text"
+		}
+		return harnessBundleResult(bundle, pass, durationMS, message, map[string]any{
+			"output_text": output,
+		}), harnessBundleFailures(candidateID, bundle, message), false
+	case "core/instruction_follow":
+		request := newHarnessRuntimeRequest(modelID, "ORB", memoryRequest, settings)
+		startedAt := time.Now()
+		response, err := service.CreateResponse(context.Background(), request)
+		durationMS := float64(time.Since(startedAt).Microseconds()) / 1000.0
+		if err != nil {
+			return harnessBundleExecutionFailure(bundle, durationMS, err), []map[string]any{newHarnessFailure(candidateID, bundle, "execution", err.Error())}, true
+		}
+		output := harnessFirstOutputText(response.Output)
+		pass := strings.Contains(output, "ORB")
+		message := ""
+		if !pass {
+			message = "expected output to contain ORB"
+		}
+		return harnessBundleResult(bundle, pass, durationMS, message, map[string]any{
+			"output_text": output,
+		}), harnessBundleFailures(candidateID, bundle, message), false
+	case "memory/scope_recall":
+		scope := memoryRequest.Scope
+		request := newHarnessRuntimeRequest(modelID, "deployment note alpha", memoryRequest, settings)
+		startedAt := time.Now()
+		response, err := service.CreateResponse(context.Background(), request)
+		durationMS := float64(time.Since(startedAt).Microseconds()) / 1000.0
+		if err != nil {
+			return harnessBundleExecutionFailure(bundle, durationMS, err), []map[string]any{newHarnessFailure(candidateID, bundle, "execution", err.Error())}, true
+		}
+		queryResults, err := service.QueryMemory(context.Background(), orb.MemoryQuery{
+			Scope: scope,
+			Query: "alpha",
+			Limit: 1,
+		})
+		if err != nil {
+			return harnessBundleExecutionFailure(bundle, durationMS, err), []map[string]any{newHarnessFailure(candidateID, bundle, "memory_query", err.Error())}, true
+		}
+		pass := len(queryResults) > 0 && queryResults[0].InputText == "deployment note alpha"
+		message := ""
+		if !pass {
+			message = "no scoped memory results matched alpha"
+		}
+		return harnessBundleResult(bundle, pass, durationMS, message, map[string]any{
+			"memory_scope":   scope,
+			"memory_matches": len(queryResults),
+			"output_text":    harnessFirstOutputText(response.Output),
+		}), harnessBundleFailures(candidateID, bundle, message), false
+	case "runtime/latency_short":
+		request := newHarnessRuntimeRequest(modelID, "latency probe", memoryRequest, settings)
+		startedAt := time.Now()
+		response, err := service.CreateResponse(context.Background(), request)
+		durationMS := float64(time.Since(startedAt).Microseconds()) / 1000.0
+		if err != nil {
+			return harnessBundleExecutionFailure(bundle, durationMS, err), []map[string]any{newHarnessFailure(candidateID, bundle, "execution", err.Error())}, true
+		}
+		thresholdMS := harnessMaxLatencyMS(state.spec.UserObjective.Constraints)
+		pass := durationMS <= float64(thresholdMS) && strings.TrimSpace(harnessFirstOutputText(response.Output)) != ""
+		message := ""
+		if !pass {
+			message = fmt.Sprintf("latency %.2fms exceeded %dms threshold", durationMS, thresholdMS)
+		}
+		return harnessBundleResult(bundle, pass, durationMS, message, map[string]any{
+			"latency_ms":   durationMS,
+			"threshold_ms": thresholdMS,
+		}), harnessBundleFailures(candidateID, bundle, message), false
+	default:
+		message := "bundle is not supported by the current runner"
+		return harnessBundleResult(bundle, false, 0, message, nil), []map[string]any{newHarnessFailure(candidateID, bundle, "bundle", message)}, false
+	}
+}
+
+func harnessBundleResult(bundle string, pass bool, durationMS float64, message string, details map[string]any) map[string]any {
+	result := map[string]any{
+		"bundle":      bundle,
+		"pass":        pass,
+		"score":       boolScore(pass),
+		"duration_ms": durationMS,
+		"message":     message,
+	}
+	if len(details) > 0 {
+		result["details"] = details
+	}
+	return result
+}
+
+func harnessBundleExecutionFailure(bundle string, durationMS float64, err error) map[string]any {
+	return map[string]any{
+		"bundle":      bundle,
+		"pass":        false,
+		"score":       0.0,
+		"duration_ms": durationMS,
+		"message":     err.Error(),
+	}
+}
+
+func harnessBundleFailures(candidateID, bundle, message string) []map[string]any {
+	if strings.TrimSpace(message) == "" {
+		return nil
+	}
+	return []map[string]any{newHarnessFailure(candidateID, bundle, "bundle", message)}
+}
+
+func newHarnessFailure(candidateID, bundle, stage, message string) map[string]any {
+	return map[string]any{
+		"id":           candidateID + ":" + bundle,
+		"candidate_id": candidateID,
+		"bundle":       bundle,
+		"stage":        stage,
+		"error":        message,
+	}
+}
+
+func expandHarnessCandidates(searchSpace map[string]any, maxCandidates int) []map[string]any {
+	candidates := expandHarnessMap(searchSpace)
+	if len(candidates) == 0 {
+		candidates = []map[string]any{{}}
+	}
+	if maxCandidates > 0 && len(candidates) > maxCandidates {
+		return candidates[:maxCandidates]
+	}
+	return candidates
+}
+
+func expandHarnessMap(source map[string]any) []map[string]any {
+	if len(source) == 0 {
+		return []map[string]any{{}}
+	}
+
+	keys := sortedHarnessKeys(source)
+	candidates := []map[string]any{{}}
+	for _, key := range keys {
+		options := expandHarnessValue(source[key])
+		next := make([]map[string]any, 0, len(candidates)*maxInt(len(options), 1))
+		for _, candidate := range candidates {
+			for _, option := range options {
+				cloned := cloneMap(candidate)
+				cloned[key] = cloneJSONValue(option)
+				next = append(next, cloned)
+			}
+		}
+		candidates = next
+	}
+	return candidates
+}
+
+func expandHarnessValue(value any) []any {
+	switch typed := value.(type) {
+	case map[string]any:
+		expandedMaps := expandHarnessMap(typed)
+		options := make([]any, 0, len(expandedMaps))
+		for _, expanded := range expandedMaps {
+			options = append(options, expanded)
+		}
+		return options
+	case []any:
+		if len(typed) == 0 {
+			return []any{nil}
+		}
+		options := make([]any, 0, len(typed))
+		for _, option := range typed {
+			options = append(options, cloneJSONValue(option))
+		}
+		return options
+	default:
+		return []any{typed}
+	}
+}
+
+func newHarnessRuntimeRequest(modelID, inputText string, memory *orb.MemoryRequest, settings map[string]any) orb.Request {
+	request := orb.Request{
+		Model: modelID,
+		Input: []orb.InputMessage{{
+			Role: "user",
+			Content: []orb.InputContent{{
+				Type: "input_text",
+				Text: inputText,
+			}},
+		}},
+	}
+	if memory != nil {
+		request.Memory = &orb.MemoryRequest{
+			Enabled: memory.Enabled,
+			Scope:   memory.Scope,
+		}
+	}
+	if len(settings) > 0 {
+		request.Settings = cloneMap(settings)
+	}
+	return request
+}
+
+func harnessFirstOutputText(items []orb.OutputItem) string {
+	for _, item := range items {
+		text := strings.TrimSpace(item.Text)
+		if text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func harnessCandidateModelID(service *orb.Service, candidateConfig map[string]any) string {
+	if value, ok := stringFromNestedValue(candidateConfig, "models", "ids"); ok {
+		return value
+	}
+	if value, ok := stringFromNestedValue(candidateConfig, "model"); ok {
+		return value
+	}
+	models := service.Models(context.Background())
+	if len(models) > 0 {
+		return models[0].ID
+	}
+	return ""
+}
+
+func harnessCandidateMemoryRequest(candidateConfig map[string]any, experimentID, candidateID string) *orb.MemoryRequest {
+	enabled, scope := harnessCandidateMemoryConfig(candidateConfig, experimentID, candidateID)
+	return &orb.MemoryRequest{
+		Enabled: enabled,
+		Scope:   scope,
+	}
+}
+
+func harnessCandidateMemoryConfig(candidateConfig map[string]any, experimentID, candidateID string) (bool, string) {
+	enabled, _ := boolFromNestedValue(candidateConfig, "memory", "enabled")
+	scope, _ := stringFromNestedValue(candidateConfig, "memory", "scopes")
+	if scope == "" {
+		scope, _ = stringFromNestedValue(candidateConfig, "memory", "scope")
+	}
+	if scope == "" {
+		scope = fmt.Sprintf("workspace:harness:%s:%s", experimentID, candidateID)
+	}
+	return enabled, scope
+}
+
+func harnessCandidateSettings(candidateConfig map[string]any) map[string]any {
+	settings, ok := mapFromNestedValue(candidateConfig, "execution_settings")
+	if !ok {
+		return nil
+	}
+	return settings
+}
+
+func harnessMaxCandidates(evolution map[string]any) int {
+	value, ok := intFromNestedValue(evolution, "max_candidates")
+	if !ok || value <= 0 {
+		return 0
+	}
+	return value
+}
+
+func harnessMaxLatencyMS(constraints map[string]any) int {
+	value, ok := intFromNestedValue(constraints, "max_p50_latency_ms")
+	if !ok || value <= 0 {
+		return 2500
+	}
+	return value
+}
+
+func lookupNestedValue(source map[string]any, path ...string) (any, bool) {
+	if len(path) == 0 {
+		return source, source != nil
+	}
+
+	var current any = source
+	for _, part := range path {
+		typed, ok := current.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		next, ok := typed[part]
+		if !ok {
+			return nil, false
+		}
+		current = next
+	}
+	return current, true
+}
+
+func stringFromNestedValue(source map[string]any, path ...string) (string, bool) {
+	value, ok := lookupNestedValue(source, path...)
+	if !ok {
+		return "", false
+	}
+	stringValue, ok := value.(string)
+	if !ok {
+		return "", false
+	}
+	stringValue = strings.TrimSpace(stringValue)
+	if stringValue == "" {
+		return "", false
+	}
+	return stringValue, true
+}
+
+func boolFromNestedValue(source map[string]any, path ...string) (bool, bool) {
+	value, ok := lookupNestedValue(source, path...)
+	if !ok {
+		return false, false
+	}
+	boolValue, ok := value.(bool)
+	if !ok {
+		return false, false
+	}
+	return boolValue, true
+}
+
+func mapFromNestedValue(source map[string]any, path ...string) (map[string]any, bool) {
+	value, ok := lookupNestedValue(source, path...)
+	if !ok {
+		return nil, false
+	}
+	mapValue, ok := value.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	return cloneMap(mapValue), true
+}
+
+func intFromNestedValue(source map[string]any, path ...string) (int, bool) {
+	value, ok := lookupNestedValue(source, path...)
+	if !ok {
+		return 0, false
+	}
+	return intFromValue(value)
 }
 
 func mustFormatJSON(payload any) string {
@@ -620,6 +1100,13 @@ func mustFormatJSON(payload any) string {
 		return "{}"
 	}
 	return string(body)
+}
+
+func boolScore(value bool) float64 {
+	if value {
+		return 1.0
+	}
+	return 0.0
 }
 
 func buildRepresentativeConfig(searchSpace map[string]any) map[string]any {
@@ -691,6 +1178,88 @@ func maxInt(left, right int) int {
 		return left
 	}
 	return right
+}
+
+func intFromValue(value any) (int, bool) {
+	switch typed := value.(type) {
+	case int:
+		return typed, true
+	case int32:
+		return int(typed), true
+	case int64:
+		return int(typed), true
+	case float32:
+		return int(typed), true
+	case float64:
+		return int(typed), true
+	default:
+		return 0, false
+	}
+}
+
+func intValue(value any) int {
+	typed, ok := intFromValue(value)
+	if !ok {
+		return 0
+	}
+	return typed
+}
+
+func floatValue(value any) float64 {
+	switch typed := value.(type) {
+	case float32:
+		return float64(typed)
+	case float64:
+		return typed
+	case int:
+		return float64(typed)
+	case int32:
+		return float64(typed)
+	case int64:
+		return float64(typed)
+	default:
+		return 0
+	}
+}
+
+func boolValue(value any) bool {
+	typed, ok := value.(bool)
+	return ok && typed
+}
+
+func stringValue(value any) string {
+	typed, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	return typed
+}
+
+func sortedHarnessKeys(source map[string]any) []string {
+	keys := make([]string, 0, len(source))
+	for key := range source {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func sortHarnessResults(results []map[string]any) {
+	sort.SliceStable(results, func(i, j int) bool {
+		leftStrict := boolValue(results[i]["strict_pass"])
+		rightStrict := boolValue(results[j]["strict_pass"])
+		if leftStrict != rightStrict {
+			return leftStrict
+		}
+
+		leftScore := floatValue(results[i]["score"])
+		rightScore := floatValue(results[j]["score"])
+		if leftScore != rightScore {
+			return leftScore > rightScore
+		}
+
+		return stringValue(results[i]["id"]) < stringValue(results[j]["id"])
+	})
 }
 
 func isHarnessArtifactKey(artifact string) bool {

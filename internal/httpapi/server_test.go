@@ -908,12 +908,20 @@ func TestHarnessExperimentsCreateListAndFetch(t *testing.T) {
 		t.Fatalf("unexpected fetched experiment payload: %#v", fetched)
 	}
 
-	if fetched.Summary["mode"] != "stub" || fetched.Summary["total_candidates"].(float64) != 4 {
+	if fetched.Summary["mode"] != "runner" || fetched.Summary["total_candidates"].(float64) != 4 {
 		t.Fatalf("unexpected summary payload: %#v", fetched.Summary)
 	}
 
-	if len(fetched.Results) != 1 || fetched.Results[0]["id"] != "cand_stub_0001" {
+	if fetched.Summary["strict_promoted"].(float64) != 2 || fetched.Summary["rejected"].(float64) != 2 {
+		t.Fatalf("unexpected promotion summary: %#v", fetched.Summary)
+	}
+
+	if len(fetched.Results) != 4 || fetched.Results[0]["promotion"] != "strict" {
 		t.Fatalf("unexpected results payload: %#v", fetched.Results)
+	}
+
+	if fetched.Results[0]["mode"] == "stub" {
+		t.Fatalf("expected real runner result, got %#v", fetched.Results[0])
 	}
 
 	if fetched.Artifacts["report_path"] != "/api/v1/harness/experiments/exp_private_memory_001/artifacts/report" {
@@ -955,7 +963,7 @@ func TestHarnessExperimentSummaryArtifactReturnsJSON(t *testing.T) {
 		t.Fatalf("expected valid summary JSON: %v", err)
 	}
 
-	if summary["object"] != "harness.summary" || summary["mode"] != "stub" {
+	if summary["object"] != "harness.summary" || summary["mode"] != "runner" {
 		t.Fatalf("unexpected summary artifact payload: %#v", summary)
 	}
 

@@ -243,9 +243,10 @@ and to document its intended direction. It now includes a minimal HTTP service,
 an adapter-backed runtime skeleton, bundled local/private echo adapters, a real
 hosted OpenAI adapter with streaming support, an upstream private HTTP adapter
 with model discovery and streaming pass-through, and an early in-memory harness
-control-plane stub that can register experiments and materialize placeholder
-artifacts. It does not yet contain production runtime code or a real harness
-execution and promotion plane.
+runner that can expand candidate search spaces and execute a small built-in
+bundle set against the live Orb runtime surface. It does not yet contain
+production runtime code or a full harness execution, persistence, and
+promotion plane.
 ## License
 
 MIT

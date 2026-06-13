@@ -10,9 +10,9 @@ Agentex Orb. It is intended to compare runtime candidates, model routes,
 memory strategies, and policy configurations against consistent bundles of
 checks.
 
-The current repository already includes an early in-memory control-plane stub
-for bundle discovery, experiment registration, experiment status fetches, and
-placeholder artifact materialization.
+The current repository already includes an early in-memory control plane and
+candidate runner for bundle discovery, experiment registration, experiment
+status fetches, and runtime-backed artifact materialization.
 
 ## Planned Responsibilities
 
@@ -53,7 +53,9 @@ Early harness work centers on:
 
 ## Status
 
-Early control-plane skeleton implemented.
+Early control-plane and runner skeleton implemented.
 
-Real bundle execution, candidate scoring, persistence, and apply/promotion
-workflows are still planned.
+The current runner can expand simple candidate search spaces and execute a
+small built-in bundle set against the live Orb runtime surface. Broader bundle
+coverage, richer scoring, persistence, and apply/promotion workflows are still
+planned.
