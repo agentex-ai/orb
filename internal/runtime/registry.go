@@ -12,22 +12,11 @@ type Registry struct {
 }
 
 func NewRegistry(adapters ...Adapter) *Registry {
-	filtered := make([]Adapter, 0, len(adapters))
-	for _, adapter := range adapters {
-		if adapter == nil {
-			continue
-		}
-		filtered = append(filtered, adapter)
-	}
-
-	return &Registry{adapters: filtered}
+	return &Registry{adapters: adapters}
 }
 
 func DefaultRegistry() *Registry {
-	return NewRegistry(
-		NewEchoAdapter(),
-		NewPrivateEchoAdapter(),
-	)
+	return NewRegistry(NewEchoAdapter(), NewPrivateEchoAdapter())
 }
 
 type RegistryConfig struct {
@@ -63,26 +52,23 @@ func ConfiguredRegistry(config RegistryConfig) *Registry {
 		}
 	}
 
-	if strings.TrimSpace(config.PrivateBaseURL) == "" {
-		adapters = append(adapters, NewPrivateEchoAdapter())
-		return NewRegistry(adapters...)
-	}
-
-	privateAdapter, err := NewPrivateHTTPAdapter(PrivateHTTPAdapterConfig{
-		BaseURL:         config.PrivateBaseURL,
-		PublicModelID:   config.PrivateModelID,
-		UpstreamModelID: config.PrivateUpstreamModelID,
-		AuthHeader:      config.PrivateAuthHeader,
-		AuthToken:       config.PrivateAuthToken,
-		Client:          config.HTTPClient,
-	})
-	if err != nil {
+	if strings.TrimSpace(config.PrivateBaseURL) != "" {
+		privateAdapter, err := NewPrivateHTTPAdapter(PrivateHTTPAdapterConfig{
+			BaseURL:         config.PrivateBaseURL,
+			PublicModelID:   config.PrivateModelID,
+			UpstreamModelID: config.PrivateUpstreamModelID,
+			AuthHeader:      config.PrivateAuthHeader,
+			AuthToken:       config.PrivateAuthToken,
+			Client:          config.HTTPClient,
+		})
+		if err == nil {
+			adapters = append(adapters, privateAdapter)
+			return NewRegistry(adapters...)
+		}
 		log.Printf("orb: invalid private http adapter config, falling back to bundled private adapter: %v", err)
-		adapters = append(adapters, NewPrivateEchoAdapter())
-		return NewRegistry(adapters...)
 	}
 
-	adapters = append(adapters, privateAdapter)
+	adapters = append(adapters, NewPrivateEchoAdapter())
 	return NewRegistry(adapters...)
 }
 
@@ -92,17 +78,14 @@ func (r *Registry) Models(ctx context.Context) []Model {
 	}
 
 	models := make([]Model, 0)
-	seen := make(map[string]struct{})
+	seen := make(map[string]bool)
 	for _, adapter := range r.adapters {
 		for _, model := range adapter.Models(ctx) {
 			key := strings.TrimSpace(model.ID)
-			if key == "" {
+			if key == "" || seen[key] {
 				continue
 			}
-			if _, ok := seen[key]; ok {
-				continue
-			}
-			seen[key] = struct{}{}
+			seen[key] = true
 			models = append(models, model)
 		}
 	}
@@ -128,10 +111,5 @@ func (r *Registry) AdapterForModel(ctx context.Context, modelID string) (Adapter
 		}
 	}
 
-	return nil, Model{}, &Error{
-		Code:       "not_found",
-		Message:    "model " + `"` + modelID + `"` + " is not available",
-		Details:    map[string]any{"model": modelID},
-		StatusCode: http.StatusNotFound,
-	}
+	return nil, Model{}, modelNotFoundError(modelID)
 }

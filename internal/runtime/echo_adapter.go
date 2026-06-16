@@ -14,32 +14,32 @@ type EchoAdapter struct {
 }
 
 func NewEchoAdapter() *EchoAdapter {
-	return NewStaticEchoAdapter("echo", Model{
-		ID:           echoModelID,
-		Object:       "model",
-		Provider:     "echo",
-		Deployment:   "local",
-		Capabilities: []string{"text"},
-		Status:       "ready",
-	}, "Echo: ")
+	return &EchoAdapter{
+		name: "echo",
+		model: Model{
+			ID:           echoModelID,
+			Object:       "model",
+			Provider:     "echo",
+			Deployment:   "local",
+			Capabilities: []string{"text"},
+			Status:       "ready",
+		},
+		textPrefix: "Echo: ",
+	}
 }
 
 func NewPrivateEchoAdapter() *EchoAdapter {
-	return NewStaticEchoAdapter("private-echo", Model{
-		ID:           privateEchoModelID,
-		Object:       "model",
-		Provider:     "private-echo",
-		Deployment:   "private",
-		Capabilities: []string{"text"},
-		Status:       "ready",
-	}, "Private Echo: ")
-}
-
-func NewStaticEchoAdapter(name string, model Model, textPrefix string) *EchoAdapter {
 	return &EchoAdapter{
-		name:       name,
-		model:      model,
-		textPrefix: textPrefix,
+		name: "private-echo",
+		model: Model{
+			ID:           privateEchoModelID,
+			Object:       "model",
+			Provider:     "private-echo",
+			Deployment:   "private",
+			Capabilities: []string{"text"},
+			Status:       "ready",
+		},
+		textPrefix: "Private Echo: ",
 	}
 }
 

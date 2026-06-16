@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -223,7 +224,7 @@ func (a *OpenAIAdapter) Generate(ctx context.Context, request Request) (Response
 		Runtime: Runtime{
 			Adapter:    a.Name(),
 			Deployment: "hosted",
-			Status:     defaultString(upstream.Status, "completed"),
+			Status:     cmp.Or(strings.TrimSpace(upstream.Status), "completed"),
 		},
 	}, nil
 }
@@ -246,7 +247,7 @@ func toOpenAIInput(messages []InputMessage) []openAIRequestInputItem {
 		}
 		result = append(result, openAIRequestInputItem{
 			Type:    "message",
-			Role:    defaultString(message.Role, "user"),
+			Role:    cmp.Or(strings.TrimSpace(message.Role), "user"),
 			Content: content,
 		})
 	}
@@ -387,10 +388,6 @@ func toOpenAIMetadata(metadata map[string]any) map[string]string {
 		result[trimmedKey] = fmt.Sprint(value)
 	}
 
-	if len(result) == 0 {
-		return nil
-	}
-
 	return result
 }
 
@@ -436,12 +433,8 @@ func openAIErrorCodeForStatus(statusCode int) string {
 		return "not_found"
 	case http.StatusTooManyRequests:
 		return "rate_limited"
-	default:
-		if statusCode >= http.StatusInternalServerError {
-			return "backend_unavailable"
-		}
-		return "backend_unavailable"
 	}
+	return "backend_unavailable"
 }
 
 func publicModelIDForOpenAIModel(modelID string) string {

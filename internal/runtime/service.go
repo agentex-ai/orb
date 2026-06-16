@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -28,80 +29,80 @@ type StreamingAdapter interface {
 }
 
 type Model struct {
-	ID           string
-	Object       string
-	Provider     string
-	Deployment   string
-	Capabilities []string
-	Status       string
-	Metadata     map[string]any
+	ID           string         `json:"id"`
+	Object       string         `json:"object"`
+	Provider     string         `json:"provider"`
+	Deployment   string         `json:"deployment"`
+	Capabilities []string       `json:"capabilities"`
+	Status       string         `json:"status,omitempty"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
 }
 
 type Request struct {
-	Model    string
-	Input    []InputMessage
-	Memory   *MemoryRequest
-	Stream   bool
-	Metadata map[string]any
-	Settings map[string]any
+	Model    string         `json:"model"`
+	Input    []InputMessage `json:"input"`
+	Memory   *MemoryRequest `json:"memory,omitempty"`
+	Stream   bool           `json:"stream,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
+	Settings map[string]any `json:"settings,omitempty"`
 }
 
 type InputMessage struct {
-	Role    string
-	Content []InputContent
+	Role    string         `json:"role"`
+	Content []InputContent `json:"content"`
 }
 
 type InputContent struct {
-	Type string
-	Text string
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
 }
 
 type MemoryRequest struct {
-	Enabled bool
-	Scope   string
+	Enabled bool   `json:"enabled"`
+	Scope   string `json:"scope,omitempty"`
 }
 
 type MemoryQuery struct {
-	Scope string
-	Query string
-	Limit int
+	Scope string `json:"scope"`
+	Query string `json:"query,omitempty"`
+	Limit int    `json:"limit,omitempty"`
 }
 
 type MemoryResult struct {
-	ID         string
-	Object     string
-	Scope      string
-	ResponseID string
-	Model      string
-	InputText  string
-	OutputText string
+	ID         string `json:"id"`
+	Object     string `json:"object"`
+	Scope      string `json:"scope"`
+	ResponseID string `json:"response_id"`
+	Model      string `json:"model"`
+	InputText  string `json:"input_text,omitempty"`
+	OutputText string `json:"output_text,omitempty"`
 }
 
 type Response struct {
-	ID      string
-	Object  string
-	Model   string
-	Output  []OutputItem
-	Usage   Usage
-	Runtime Runtime
+	ID      string       `json:"id"`
+	Object  string       `json:"object"`
+	Model   string       `json:"model"`
+	Output  []OutputItem `json:"output"`
+	Usage   Usage        `json:"usage"`
+	Runtime Runtime      `json:"runtime"`
 }
 
 type OutputItem struct {
-	Type string
-	Text string
+	Type string `json:"type"`
+	Text string `json:"text"`
 }
 
 type Usage struct {
-	InputTokens  int
-	OutputTokens int
-	TotalTokens  int
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+	TotalTokens  int `json:"total_tokens"`
 }
 
 type Runtime struct {
-	Adapter       string
-	Deployment    string
-	MemoryApplied bool
-	Status        string
+	Adapter       string `json:"adapter"`
+	Deployment    string `json:"deployment"`
+	MemoryApplied bool   `json:"memory_applied"`
+	Status        string `json:"status"`
 }
 
 type StreamEvent struct {
@@ -264,7 +265,7 @@ func (s *Service) QueryMemory(_ context.Context, query MemoryQuery) ([]MemoryRes
 			}
 		}
 
-		results = append(results, cloneMemoryResult(item))
+		results = append(results, item)
 	}
 
 	return results, nil
@@ -293,8 +294,7 @@ func validateRequest(request Request) error {
 }
 
 func normalizeError(err error) error {
-	apiErr, ok := err.(*Error)
-	if ok {
+	if apiErr, ok := err.(*Error); ok {
 		if apiErr.StatusCode == 0 {
 			apiErr.StatusCode = statusCodeFor(apiErr.Code)
 		}
@@ -395,20 +395,10 @@ func (s *Service) storeMemory(request Request, response Response) {
 }
 
 func cloneModels(models []Model) []Model {
-	if len(models) == 0 {
-		return nil
-	}
-
-	cloned := make([]Model, 0, len(models))
-	for _, model := range models {
-		next := model
-		if len(model.Capabilities) > 0 {
-			next.Capabilities = append([]string(nil), model.Capabilities...)
-		}
-		if len(model.Metadata) > 0 {
-			next.Metadata = cloneMetadata(model.Metadata)
-		}
-		cloned = append(cloned, next)
+	cloned := slices.Clone(models)
+	for i := range cloned {
+		cloned[i].Capabilities = slices.Clone(cloned[i].Capabilities)
+		cloned[i].Metadata = cloneMetadata(cloned[i].Metadata)
 	}
 
 	return cloned
@@ -423,7 +413,7 @@ func cloneMetadata(metadata map[string]any) map[string]any {
 	for key, value := range metadata {
 		switch typed := value.(type) {
 		case []string:
-			cloned[key] = append([]string(nil), typed...)
+			cloned[key] = slices.Clone(typed)
 		case map[string]any:
 			cloned[key] = cloneMetadata(typed)
 		default:
@@ -435,15 +425,8 @@ func cloneMetadata(metadata map[string]any) map[string]any {
 }
 
 func cloneResponse(response Response) Response {
-	cloned := response
-	if len(response.Output) > 0 {
-		cloned.Output = append([]OutputItem(nil), response.Output...)
-	}
-	return cloned
-}
-
-func cloneMemoryResult(item MemoryResult) MemoryResult {
-	return item
+	response.Output = slices.Clone(response.Output)
+	return response
 }
 
 func joinedInputText(messages []InputMessage) string {
@@ -475,11 +458,4 @@ func joinedOutputText(items []OutputItem) string {
 	}
 
 	return strings.Join(parts, "\n")
-}
-
-func min(a int, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

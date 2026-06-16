@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -36,81 +37,6 @@ type PrivateHTTPAdapter struct {
 type privateHTTPResolvedModel struct {
 	Model           Model
 	UpstreamModelID string
-}
-
-type privateHTTPRequest struct {
-	Model    string                    `json:"model"`
-	Input    []privateHTTPInputMessage `json:"input"`
-	Memory   *privateHTTPMemory        `json:"memory,omitempty"`
-	Stream   bool                      `json:"stream,omitempty"`
-	Metadata map[string]any            `json:"metadata,omitempty"`
-	Settings map[string]any            `json:"settings,omitempty"`
-}
-
-type privateHTTPInputMessage struct {
-	Role    string                    `json:"role"`
-	Content []privateHTTPInputContent `json:"content"`
-}
-
-type privateHTTPInputContent struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
-}
-
-type privateHTTPMemory struct {
-	Enabled bool   `json:"enabled"`
-	Scope   string `json:"scope,omitempty"`
-}
-
-type privateHTTPResponse struct {
-	ID      string                     `json:"id"`
-	Object  string                     `json:"object"`
-	Model   string                     `json:"model"`
-	Output  []privateHTTPResponseItem  `json:"output"`
-	Usage   privateHTTPUsage           `json:"usage"`
-	Runtime privateHTTPRuntimeMetadata `json:"runtime"`
-}
-
-type privateHTTPResponseItem struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
-}
-
-type privateHTTPModelList struct {
-	Object string             `json:"object"`
-	Data   []privateHTTPModel `json:"data"`
-}
-
-type privateHTTPModel struct {
-	ID           string   `json:"id"`
-	Object       string   `json:"object"`
-	Provider     string   `json:"provider"`
-	Deployment   string   `json:"deployment"`
-	Capabilities []string `json:"capabilities"`
-	Status       string   `json:"status"`
-}
-
-type privateHTTPUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
-	TotalTokens  int `json:"total_tokens"`
-}
-
-type privateHTTPRuntimeMetadata struct {
-	Adapter       string `json:"adapter"`
-	Deployment    string `json:"deployment"`
-	MemoryApplied bool   `json:"memory_applied"`
-	Status        string `json:"status"`
-}
-
-type privateHTTPErrorEnvelope struct {
-	Error privateHTTPError `json:"error"`
-}
-
-type privateHTTPError struct {
-	Code    string         `json:"code"`
-	Message string         `json:"message"`
-	Details map[string]any `json:"details"`
 }
 
 func NewPrivateHTTPAdapter(config PrivateHTTPAdapterConfig) (*PrivateHTTPAdapter, error) {
@@ -190,16 +116,13 @@ func (a *PrivateHTTPAdapter) discoverModels(ctx context.Context) []Model {
 	}
 
 	discovered := make([]Model, 0, len(models))
-	seen := make(map[string]struct{})
+	seen := make(map[string]bool)
 	for _, model := range models {
 		resolved, ok := a.resolvedModelFromUpstream(model)
-		if !ok {
+		if !ok || seen[resolved.Model.ID] {
 			continue
 		}
-		if _, exists := seen[resolved.Model.ID]; exists {
-			continue
-		}
-		seen[resolved.Model.ID] = struct{}{}
+		seen[resolved.Model.ID] = true
 		discovered = append(discovered, resolved.Model)
 	}
 
@@ -221,7 +144,7 @@ func (a *PrivateHTTPAdapter) fallbackSingleModel() Model {
 	}
 }
 
-func (a *PrivateHTTPAdapter) fetchModels(ctx context.Context) ([]privateHTTPModel, error) {
+func (a *PrivateHTTPAdapter) fetchModels(ctx context.Context) ([]Model, error) {
 	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, a.baseURL+"/v1/models", nil)
 	if err != nil {
 		return nil, err
@@ -242,7 +165,10 @@ func (a *PrivateHTTPAdapter) fetchModels(ctx context.Context) ([]privateHTTPMode
 		return nil, toPrivateHTTPError(httpResponse.StatusCode, body)
 	}
 
-	var response privateHTTPModelList
+	var response struct {
+		Object string  `json:"object"`
+		Data   []Model `json:"data"`
+	}
 	if err := json.NewDecoder(httpResponse.Body).Decode(&response); err != nil {
 		return nil, err
 	}
@@ -256,13 +182,10 @@ func (a *PrivateHTTPAdapter) Generate(ctx context.Context, request Request) (Res
 		return Response{}, err
 	}
 
-	payload, err := json.Marshal(privateHTTPRequest{
-		Model:    targetModel.UpstreamModelID,
-		Input:    toPrivateHTTPInput(request.Input),
-		Memory:   toPrivateHTTPMemory(request.Memory),
-		Metadata: request.Metadata,
-		Settings: request.Settings,
-	})
+	payload := request
+	payload.Model = targetModel.UpstreamModelID
+
+	requestBody, err := json.Marshal(payload)
 	if err != nil {
 		return Response{}, &Error{
 			Code:       "internal_error",
@@ -271,7 +194,7 @@ func (a *PrivateHTTPAdapter) Generate(ctx context.Context, request Request) (Res
 		}
 	}
 
-	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+"/v1/responses", bytes.NewReader(payload))
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+"/v1/responses", bytes.NewReader(requestBody))
 	if err != nil {
 		return Response{}, &Error{
 			Code:       "backend_unavailable",
@@ -293,7 +216,7 @@ func (a *PrivateHTTPAdapter) Generate(ctx context.Context, request Request) (Res
 	}
 	defer httpResponse.Body.Close()
 
-	body, err := io.ReadAll(httpResponse.Body)
+	responseBody, err := io.ReadAll(httpResponse.Body)
 	if err != nil {
 		return Response{}, &Error{
 			Code:       "backend_unavailable",
@@ -303,11 +226,11 @@ func (a *PrivateHTTPAdapter) Generate(ctx context.Context, request Request) (Res
 	}
 
 	if httpResponse.StatusCode >= http.StatusBadRequest {
-		return Response{}, toPrivateHTTPError(httpResponse.StatusCode, body)
+		return Response{}, toPrivateHTTPError(httpResponse.StatusCode, responseBody)
 	}
 
-	var upstream privateHTTPResponse
-	if err := json.Unmarshal(body, &upstream); err != nil {
+	var upstream Response
+	if err := json.Unmarshal(responseBody, &upstream); err != nil {
 		return Response{}, &Error{
 			Code:       "backend_unavailable",
 			Message:    "private adapter returned invalid JSON",
@@ -316,23 +239,11 @@ func (a *PrivateHTTPAdapter) Generate(ctx context.Context, request Request) (Res
 		}
 	}
 
-	return Response{
-		ID:     upstream.ID,
-		Object: upstream.Object,
-		Model:  targetModel.Model.ID,
-		Output: toRuntimeOutput(upstream.Output),
-		Usage: Usage{
-			InputTokens:  upstream.Usage.InputTokens,
-			OutputTokens: upstream.Usage.OutputTokens,
-			TotalTokens:  upstream.Usage.TotalTokens,
-		},
-		Runtime: Runtime{
-			Adapter:       a.Name(),
-			Deployment:    "private",
-			MemoryApplied: upstream.Runtime.MemoryApplied,
-			Status:        strings.TrimSpace(upstream.Runtime.Status),
-		},
-	}, nil
+	upstream.Model = targetModel.Model.ID
+	upstream.Runtime.Adapter = a.Name()
+	upstream.Runtime.Deployment = "private"
+	upstream.Runtime.Status = strings.TrimSpace(upstream.Runtime.Status)
+	return upstream, nil
 }
 
 func (a *PrivateHTTPAdapter) GenerateStream(ctx context.Context, request Request, emit func(StreamEvent) error) error {
@@ -348,14 +259,11 @@ func (a *PrivateHTTPAdapter) GenerateStream(ctx context.Context, request Request
 		}
 	}
 
-	payload, err := json.Marshal(privateHTTPRequest{
-		Model:    targetModel.UpstreamModelID,
-		Input:    toPrivateHTTPInput(request.Input),
-		Memory:   toPrivateHTTPMemory(request.Memory),
-		Stream:   true,
-		Metadata: request.Metadata,
-		Settings: request.Settings,
-	})
+	payload := request
+	payload.Model = targetModel.UpstreamModelID
+	payload.Stream = true
+
+	requestBody, err := json.Marshal(payload)
 	if err != nil {
 		return &Error{
 			Code:       "internal_error",
@@ -364,7 +272,7 @@ func (a *PrivateHTTPAdapter) GenerateStream(ctx context.Context, request Request
 		}
 	}
 
-	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+"/v1/responses", bytes.NewReader(payload))
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, a.baseURL+"/v1/responses", bytes.NewReader(requestBody))
 	if err != nil {
 		return &Error{
 			Code:       "backend_unavailable",
@@ -416,7 +324,16 @@ func (a *PrivateHTTPAdapter) resolveTargetModel(ctx context.Context, publicModel
 
 	models, err := a.fetchModels(ctx)
 	if err != nil {
-		return privateHTTPResolvedModel{}, toPrivateHTTPDiscoveryError(err)
+		var apiErr *Error
+		if errors.As(err, &apiErr) {
+			return privateHTTPResolvedModel{}, apiErr
+		}
+		return privateHTTPResolvedModel{}, &Error{
+			Code:       "backend_unavailable",
+			Message:    "private model discovery failed",
+			Details:    map[string]any{"error": err.Error()},
+			StatusCode: http.StatusBadGateway,
+		}
 	}
 
 	for _, model := range models {
@@ -432,7 +349,7 @@ func (a *PrivateHTTPAdapter) resolveTargetModel(ctx context.Context, publicModel
 	return privateHTTPResolvedModel{}, modelNotFoundError(publicModelID)
 }
 
-func (a *PrivateHTTPAdapter) resolvedModelFromUpstream(model privateHTTPModel) (privateHTTPResolvedModel, bool) {
+func (a *PrivateHTTPAdapter) resolvedModelFromUpstream(model Model) (privateHTTPResolvedModel, bool) {
 	upstreamModelID := strings.TrimSpace(model.ID)
 	if upstreamModelID == "" {
 		return privateHTTPResolvedModel{}, false
@@ -449,7 +366,7 @@ func (a *PrivateHTTPAdapter) resolvedModelFromUpstream(model privateHTTPModel) (
 	}, true
 }
 
-func (a *PrivateHTTPAdapter) runtimeModelFromUpstream(publicModelID string, model privateHTTPModel) Model {
+func (a *PrivateHTTPAdapter) runtimeModelFromUpstream(publicModelID string, model Model) Model {
 	capabilities := model.Capabilities
 	if len(capabilities) == 0 {
 		capabilities = []string{"text"}
@@ -471,11 +388,11 @@ func (a *PrivateHTTPAdapter) runtimeModelFromUpstream(publicModelID string, mode
 
 	return Model{
 		ID:           publicModelID,
-		Object:       defaultString(model.Object, "model"),
+		Object:       cmp.Or(strings.TrimSpace(model.Object), "model"),
 		Provider:     a.Name(),
 		Deployment:   "private",
 		Capabilities: capabilities,
-		Status:       defaultString(model.Status, "ready"),
+		Status:       cmp.Or(strings.TrimSpace(model.Status), "ready"),
 		Metadata:     metadata,
 	}
 }
@@ -486,7 +403,7 @@ func (a *PrivateHTTPAdapter) applyAuthHeader(request *http.Request) {
 		return
 	}
 
-	headerName := defaultString(a.authHeader, "Authorization")
+	headerName := cmp.Or(a.authHeader, "Authorization")
 	headerValue := token
 	if strings.EqualFold(headerName, "Authorization") && !strings.Contains(token, " ") {
 		headerValue = "Bearer " + token
@@ -495,47 +412,14 @@ func (a *PrivateHTTPAdapter) applyAuthHeader(request *http.Request) {
 	request.Header.Set(headerName, headerValue)
 }
 
-func toPrivateHTTPInput(messages []InputMessage) []privateHTTPInputMessage {
-	result := make([]privateHTTPInputMessage, 0, len(messages))
-	for _, message := range messages {
-		content := make([]privateHTTPInputContent, 0, len(message.Content))
-		for _, item := range message.Content {
-			content = append(content, privateHTTPInputContent{
-				Type: item.Type,
-				Text: item.Text,
-			})
-		}
-		result = append(result, privateHTTPInputMessage{
-			Role:    message.Role,
-			Content: content,
-		})
-	}
-	return result
-}
-
-func toPrivateHTTPMemory(memory *MemoryRequest) *privateHTTPMemory {
-	if memory == nil {
-		return nil
-	}
-	return &privateHTTPMemory{
-		Enabled: memory.Enabled,
-		Scope:   memory.Scope,
-	}
-}
-
-func toRuntimeOutput(items []privateHTTPResponseItem) []OutputItem {
-	output := make([]OutputItem, 0, len(items))
-	for _, item := range items {
-		output = append(output, OutputItem{
-			Type: item.Type,
-			Text: item.Text,
-		})
-	}
-	return output
-}
-
 func toPrivateHTTPError(statusCode int, body []byte) error {
-	var envelope privateHTTPErrorEnvelope
+	var envelope struct {
+		Error struct {
+			Code    string         `json:"code"`
+			Message string         `json:"message"`
+			Details map[string]any `json:"details"`
+		} `json:"error"`
+	}
 	if err := json.Unmarshal(body, &envelope); err == nil && envelope.Error.Code != "" {
 		return &Error{
 			Code:       envelope.Error.Code,
@@ -553,17 +437,8 @@ func toPrivateHTTPError(statusCode int, body []byte) error {
 	}
 }
 
-func defaultString(value string, fallback string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return fallback
-	}
-	return value
-}
-
 func publicModelIDForUpstream(upstreamModelID string) string {
-	modelID := strings.TrimSpace(upstreamModelID)
-	modelID = strings.TrimLeft(modelID, "/")
+	modelID := strings.TrimLeft(strings.TrimSpace(upstreamModelID), "/")
 	if modelID == "" {
 		return ""
 	}
@@ -579,22 +454,8 @@ func publicModelIDForUpstream(upstreamModelID string) string {
 func modelNotFoundError(modelID string) error {
 	return &Error{
 		Code:       "not_found",
-		Message:    "model " + `"` + modelID + `"` + " is not available",
+		Message:    fmt.Sprintf("model %q is not available", modelID),
 		Details:    map[string]any{"model": modelID},
 		StatusCode: http.StatusNotFound,
-	}
-}
-
-func toPrivateHTTPDiscoveryError(err error) error {
-	var apiErr *Error
-	if errors.As(err, &apiErr) {
-		return apiErr
-	}
-
-	return &Error{
-		Code:       "backend_unavailable",
-		Message:    "private model discovery failed",
-		Details:    map[string]any{"error": err.Error()},
-		StatusCode: http.StatusBadGateway,
 	}
 }

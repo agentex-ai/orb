@@ -9,8 +9,13 @@ import (
 	"testing"
 )
 
+type modelList struct {
+	Object string  `json:"object"`
+	Data   []Model `json:"data"`
+}
+
 func TestPrivateHTTPAdapterGenerate(t *testing.T) {
-	var gotBody privateHTTPRequest
+	var gotBody Request
 	var gotAuth string
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/v1/responses" {
@@ -23,17 +28,17 @@ func TestPrivateHTTPAdapterGenerate(t *testing.T) {
 		}
 
 		writer.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(writer).Encode(privateHTTPResponse{
+		_ = json.NewEncoder(writer).Encode(Response{
 			ID:     "resp_upstream",
 			Object: "response",
 			Model:  "upstream-model",
-			Output: []privateHTTPResponseItem{{Type: "output_text", Text: "Upstream: hello private"}},
-			Usage: privateHTTPUsage{
+			Output: []OutputItem{{Type: "output_text", Text: "Upstream: hello private"}},
+			Usage: Usage{
 				InputTokens:  12,
 				OutputTokens: 4,
 				TotalTokens:  16,
 			},
-			Runtime: privateHTTPRuntimeMetadata{
+			Runtime: Runtime{
 				Adapter:       "upstream",
 				Deployment:    "private",
 				MemoryApplied: true,
@@ -88,14 +93,17 @@ func TestPrivateHTTPAdapterGenerate(t *testing.T) {
 }
 
 func TestPrivateHTTPAdapterGenerateUsesDiscoveredModelRoute(t *testing.T) {
-	var gotBody privateHTTPRequest
+	var gotBody Request
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/v1/models":
 			writer.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(writer).Encode(privateHTTPModelList{
+			_ = json.NewEncoder(writer).Encode(struct {
+				Object string  `json:"object"`
+				Data   []Model `json:"data"`
+			}{
 				Object: "list",
-				Data: []privateHTTPModel{
+				Data: []Model{
 					{
 						ID:           "qwen3-32b",
 						Object:       "model",
@@ -112,12 +120,12 @@ func TestPrivateHTTPAdapterGenerateUsesDiscoveredModelRoute(t *testing.T) {
 			}
 
 			writer.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(writer).Encode(privateHTTPResponse{
+			_ = json.NewEncoder(writer).Encode(Response{
 				ID:     "resp_multi",
 				Object: "response",
 				Model:  "qwen3-32b",
-				Output: []privateHTTPResponseItem{{Type: "output_text", Text: "upstream multi ok"}},
-				Runtime: privateHTTPRuntimeMetadata{
+				Output: []OutputItem{{Type: "output_text", Text: "upstream multi ok"}},
+				Runtime: Runtime{
 					Status: "warm",
 				},
 			})
@@ -154,7 +162,7 @@ func TestPrivateHTTPAdapterGenerateUsesDiscoveredModelRoute(t *testing.T) {
 
 func TestPrivateHTTPAdapterGenerateStream(t *testing.T) {
 	var gotAccept string
-	var gotBody privateHTTPRequest
+	var gotBody Request
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/v1/responses" {
@@ -229,9 +237,9 @@ func TestPrivateHTTPAdapterModelsUsesUpstreamDiscovery(t *testing.T) {
 		}
 		gotAuth = request.Header.Get("Authorization")
 		writer.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(writer).Encode(privateHTTPModelList{
+		_ = json.NewEncoder(writer).Encode(modelList{
 			Object: "list",
-			Data: []privateHTTPModel{
+			Data: []Model{
 				{
 					ID:           "upstream-private",
 					Object:       "model",
@@ -286,9 +294,9 @@ func TestPrivateHTTPAdapterModelsDiscoversMultipleUpstreamModels(t *testing.T) {
 		}
 
 		writer.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(writer).Encode(privateHTTPModelList{
+		_ = json.NewEncoder(writer).Encode(modelList{
 			Object: "list",
-			Data: []privateHTTPModel{
+			Data: []Model{
 				{
 					ID:           "qwen3-32b",
 					Object:       "model",
@@ -384,12 +392,12 @@ func TestPrivateHTTPAdapterGenerateWithCustomAuthHeader(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		gotHeader = request.Header.Get("X-API-Key")
 		writer.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(writer).Encode(privateHTTPResponse{
+		_ = json.NewEncoder(writer).Encode(Response{
 			ID:     "resp_upstream",
 			Object: "response",
 			Model:  "upstream-model",
-			Output: []privateHTTPResponseItem{{Type: "output_text", Text: "ok"}},
-			Runtime: privateHTTPRuntimeMetadata{
+			Output: []OutputItem{{Type: "output_text", Text: "ok"}},
+			Runtime: Runtime{
 				Status: "ready",
 			},
 		})
@@ -428,9 +436,9 @@ func TestPrivateHTTPAdapterGenerateReturnsNotFoundForUnknownDiscoveredModel(t *t
 		}
 
 		writer.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(writer).Encode(privateHTTPModelList{
+		_ = json.NewEncoder(writer).Encode(modelList{
 			Object: "list",
-			Data: []privateHTTPModel{
+			Data: []Model{
 				{ID: "qwen3-32b", Object: "model", Provider: "vllm", Deployment: "private", Status: "ready"},
 			},
 		})
@@ -492,9 +500,9 @@ func TestConfiguredRegistryUsesPrivateHTTPAdapterDiscoveredModels(t *testing.T) 
 		}
 
 		writer.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(writer).Encode(privateHTTPModelList{
+		_ = json.NewEncoder(writer).Encode(modelList{
 			Object: "list",
-			Data: []privateHTTPModel{
+			Data: []Model{
 				{ID: "qwen3-32b", Object: "model", Provider: "vllm", Deployment: "private", Status: "warm"},
 				{ID: "llama3-70b", Object: "model", Provider: "vllm", Deployment: "private", Status: "ready"},
 			},

@@ -78,7 +78,7 @@ func TestResponsesReturnsEchoPayload(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", recorder.Code)
 	}
 
-	var response ResponseEnvelope
+	var response orb.Response
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatalf("expected valid JSON response: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestResponsesReturnsPrivateEchoPayload(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", recorder.Code)
 	}
 
-	var response ResponseEnvelope
+	var response orb.Response
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatalf("expected valid JSON response: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestResponseByIDReturnsStoredResponse(t *testing.T) {
 		t.Fatalf("expected create status 200, got %d", createRecorder.Code)
 	}
 
-	var created ResponseEnvelope
+	var created orb.Response
 	if err := json.Unmarshal(createRecorder.Body.Bytes(), &created); err != nil {
 		t.Fatalf("expected valid create JSON response: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestResponseByIDReturnsStoredResponse(t *testing.T) {
 		t.Fatalf("expected json content type, got %q", contentType)
 	}
 
-	var response ResponseEnvelope
+	var response orb.Response
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatalf("expected valid JSON response: %v", err)
 	}
@@ -297,7 +297,7 @@ func TestRunsReturnsEchoPayload(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", recorder.Code)
 	}
 
-	var response ResponseEnvelope
+	var response orb.Response
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatalf("expected valid JSON response: %v", err)
 	}
@@ -452,7 +452,7 @@ func TestResponsesRoutesToOpenAIAdapter(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", recorder.Code)
 	}
 
-	var response ResponseEnvelope
+	var response orb.Response
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatalf("expected valid JSON response: %v", err)
 	}
@@ -794,7 +794,7 @@ func TestResponsesRoutesToDiscoveredPrivateHTTPModel(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", recorder.Code)
 	}
 
-	var response ResponseEnvelope
+	var response orb.Response
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatalf("expected valid JSON response: %v", err)
 	}
