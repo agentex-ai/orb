@@ -507,13 +507,10 @@ func buildHarnessRunArtifacts(service *orb.Service, state *harnessExperimentStat
 	startedAt := time.Now()
 	maxCandidates := harnessMaxCandidates(state.spec.Evolution)
 	candidateConfigs := expandHarnessCandidates(state.spec.SearchSpace, maxCandidates)
-	if len(candidateConfigs) == 0 {
-		candidateConfigs = []map[string]any{{}}
-	}
 
 	plannedCandidates := make([]map[string]any, 0, len(candidateConfigs))
 	results := make([]map[string]any, 0, len(candidateConfigs))
-	failures := make([]map[string]any, 0)
+	var failures []map[string]any
 	strictPromoted := 0
 	failedCandidates := 0
 
@@ -680,7 +677,7 @@ func evaluateHarnessCandidate(service *orb.Service, state *harnessExperimentStat
 	modelID := harnessCandidateModelID(service, candidateConfig)
 	memoryEnabled, memoryScope := harnessCandidateMemoryConfig(candidateConfig, state.spec.ExperimentID, candidateID)
 	bundleResults := make([]map[string]any, 0, len(state.spec.Bundles))
-	failures := make([]map[string]any, 0)
+	var failures []map[string]any
 	executionFailed := false
 	passedBundles := 0
 
@@ -880,9 +877,6 @@ func newHarnessFailure(candidateID, bundle, stage, message string) map[string]an
 
 func expandHarnessCandidates(searchSpace map[string]any, maxCandidates int) []map[string]any {
 	candidates := expandHarnessMap(searchSpace)
-	if len(candidates) == 0 {
-		candidates = []map[string]any{{}}
-	}
 	if maxCandidates > 0 && len(candidates) > maxCandidates {
 		return candidates[:maxCandidates]
 	}
@@ -898,7 +892,7 @@ func expandHarnessMap(source map[string]any) []map[string]any {
 	candidates := []map[string]any{{}}
 	for _, key := range keys {
 		options := expandHarnessValue(source[key])
-		next := make([]map[string]any, 0, len(candidates)*max(len(options), 1))
+		next := make([]map[string]any, 0, len(candidates)*len(options))
 		for _, candidate := range candidates {
 			for _, option := range options {
 				cloned := cloneMap(candidate)
@@ -971,16 +965,16 @@ func harnessCandidateMemoryConfig(candidateConfig map[string]any, experimentID, 
 }
 
 func harnessMaxCandidates(evolution map[string]any) int {
-	value, ok := intFromNestedValue(evolution, "max_candidates")
-	if !ok || value <= 0 {
+	value, _ := intFromNestedValue(evolution, "max_candidates")
+	if value <= 0 {
 		return 0
 	}
 	return value
 }
 
 func harnessMaxLatencyMS(constraints map[string]any) int {
-	value, ok := intFromNestedValue(constraints, "max_p50_latency_ms")
-	if !ok || value <= 0 {
+	value, _ := intFromNestedValue(constraints, "max_p50_latency_ms")
+	if value <= 0 {
 		return 2500
 	}
 	return value
@@ -1080,10 +1074,7 @@ func intFromValue(value any) (int, bool) {
 }
 
 func intValue(value any) int {
-	typed, ok := intFromValue(value)
-	if !ok {
-		return 0
-	}
+	typed, _ := intFromValue(value)
 	return typed
 }
 
@@ -1105,15 +1096,12 @@ func floatValue(value any) float64 {
 }
 
 func boolValue(value any) bool {
-	typed, ok := value.(bool)
-	return ok && typed
+	typed, _ := value.(bool)
+	return typed
 }
 
 func stringValue(value any) string {
-	typed, ok := value.(string)
-	if !ok {
-		return ""
-	}
+	typed, _ := value.(string)
 	return typed
 }
 

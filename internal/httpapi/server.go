@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 
 	orb "github.com/agentex-ai/orb/internal/runtime"
@@ -31,8 +32,16 @@ type APIError struct {
 }
 
 type server struct {
-	service *orb.Service
-	harness *harnessRegistry
+	service       *orb.Service
+	harness       *harnessRegistry
+	clientProxy   *clientProxyIntegration
+	publicBaseURL string
+}
+
+type ServerConfig struct {
+	Service               *orb.Service
+	ClientProxyConfigPath string
+	PublicBaseURL         string
 }
 
 func NewServer() http.Handler {
@@ -40,17 +49,35 @@ func NewServer() http.Handler {
 }
 
 func NewServerWithService(service *orb.Service) http.Handler {
+	return NewServerWithConfig(ServerConfig{
+		Service:               service,
+		ClientProxyConfigPath: os.Getenv("ORB_CLIENT_PROXY_CONFIG"),
+		PublicBaseURL:         os.Getenv("ORB_PUBLIC_BASE_URL"),
+	})
+}
+
+func NewServerWithConfig(config ServerConfig) http.Handler {
+	service := config.Service
 	if service == nil {
 		service = orb.NewService(orb.DefaultRegistry())
 	}
 
-	api := server{service: service, harness: newHarnessRegistry()}
+	api := server{
+		service:       service,
+		harness:       newHarnessRegistry(),
+		clientProxy:   newClientProxyIntegration(config.ClientProxyConfigPath),
+		publicBaseURL: strings.TrimRight(strings.TrimSpace(config.PublicBaseURL), "/"),
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/models", api.handleModels)
 	mux.HandleFunc("POST /v1/responses", api.handleExecution)
 	mux.HandleFunc("GET /v1/responses/{response_id}", api.handleResponseByID)
+	mux.HandleFunc("POST /v1/messages", api.handleAnthropicMessages)
 	mux.HandleFunc("POST /v1/memory/query", api.handleMemoryQuery)
 	mux.HandleFunc("POST /v1/runs", api.handleExecution)
+	mux.HandleFunc("GET /api/v1/client-proxy/profiles", api.handleClientProxyProfiles)
+	mux.HandleFunc("POST /api/v1/client-proxy/activate", api.handleClientProxyActivate)
+	mux.HandleFunc("POST /api/v1/client-proxy/proxy", api.handleClientProxyProxy)
 	mux.HandleFunc("GET /api/v1/harness/bundles", api.handleHarnessBundles)
 	mux.HandleFunc("POST /api/v1/harness/experiments", api.handleHarnessCreateExperiment)
 	mux.HandleFunc("GET /api/v1/harness/experiments", api.handleHarnessListExperiments)

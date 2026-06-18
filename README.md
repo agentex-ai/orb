@@ -62,6 +62,11 @@ go run ./cmd/orb
 The server listens on `:8080` by default. Set `ORB_ADDR` to override the bind
 address.
 
+Optional client proxy environment variables:
+
+- `ORB_PUBLIC_BASE_URL`: public base URL written into client proxy profiles; defaults to the request host when applying the profile over HTTP
+- `ORB_CLIENT_PROXY_CONFIG`: optional client proxy config path override; defaults to `~/.orb/client-proxy.json`
+
 Optional OpenAI hosted routing environment variables:
 
 - `ORB_OPENAI_API_KEY`: OpenAI API key for the hosted adapter
@@ -82,8 +87,12 @@ Current implemented endpoints:
 - `GET /v1/models`
 - `POST /v1/responses`
 - `GET /v1/responses/{response_id}`
+- `POST /v1/messages`
 - `POST /v1/memory/query`
 - `POST /v1/runs`
+- `GET /api/v1/client-proxy/profiles`
+- `POST /api/v1/client-proxy/activate`
+- `POST /api/v1/client-proxy/proxy`
 - `GET /api/v1/harness/bundles`
 - `POST /api/v1/harness/experiments`
 - `GET /api/v1/harness/experiments`
@@ -134,6 +143,25 @@ curl http://localhost:8080/v1/memory/query \
 The current `POST /v1/runs` path is a thin wrapper around the same execution
 flow used by `POST /v1/responses`. It currently accepts the same request body
 shape and returns the same JSON or SSE response shapes.
+
+`POST /v1/messages` is a minimal Anthropic-compatible proxy shim for Claude
+Code-style clients. It maps text-only Anthropic messages onto Orb's runtime
+request shape and supports streaming when the selected Orb model supports
+streaming.
+
+To create or update a local client profile that points Claude Code at the running
+Orb API proxy:
+
+```bash
+curl http://localhost:8080/api/v1/client-proxy/proxy \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "orb-api-proxy",
+    "model": "orb/openai/gpt-5-mini",
+    "base_url": "http://localhost:8080",
+    "api_key": "orb"
+  }'
+```
 
 The current runtime uses a model-routed adapter registry. The default registry
 currently exposes:

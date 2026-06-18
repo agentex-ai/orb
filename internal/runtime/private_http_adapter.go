@@ -242,7 +242,6 @@ func (a *PrivateHTTPAdapter) Generate(ctx context.Context, request Request) (Res
 	upstream.Model = targetModel.Model.ID
 	upstream.Runtime.Adapter = a.Name()
 	upstream.Runtime.Deployment = "private"
-	upstream.Runtime.Status = strings.TrimSpace(upstream.Runtime.Status)
 	return upstream, nil
 }
 

@@ -63,6 +63,25 @@ func TestServiceCreateResponseUsesEchoAdapter(t *testing.T) {
 	}
 }
 
+func TestServiceEchoSkipsSystemInput(t *testing.T) {
+	service := NewService(DefaultRegistry())
+
+	response, err := service.CreateResponse(context.Background(), Request{
+		Model: "orb/example-text",
+		Input: []InputMessage{
+			{Role: "system", Content: []InputContent{{Type: "input_text", Text: "stay brief"}}},
+			{Role: "user", Content: []InputContent{{Type: "input_text", Text: "hello orb"}}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+
+	if len(response.Output) != 1 || response.Output[0].Text != "Echo: hello orb" {
+		t.Fatalf("unexpected output payload: %#v", response.Output)
+	}
+}
+
 func TestServiceCreateResponseUnknownModel(t *testing.T) {
 	service := NewService(DefaultRegistry())
 

@@ -168,6 +168,7 @@ func (s *Service) CreateResponse(ctx context.Context, request Request) (Response
 		response.Runtime.Deployment = model.Deployment
 	}
 	response.Runtime.MemoryApplied = request.Memory != nil && request.Memory.Enabled
+	response.Runtime.Status = strings.TrimSpace(response.Runtime.Status)
 	if response.Runtime.Status == "" {
 		response.Runtime.Status = model.Status
 	}
@@ -329,6 +330,10 @@ func statusCodeFor(code string) int {
 
 func firstInputText(messages []InputMessage) string {
 	for _, message := range messages {
+		switch strings.ToLower(strings.TrimSpace(message.Role)) {
+		case "system", "developer":
+			continue
+		}
 		for _, content := range message.Content {
 			if content.Type != "input_text" {
 				continue
@@ -430,7 +435,7 @@ func cloneResponse(response Response) Response {
 }
 
 func joinedInputText(messages []InputMessage) string {
-	parts := make([]string, 0)
+	var parts []string
 	for _, message := range messages {
 		for _, content := range message.Content {
 			if content.Type != "input_text" {
@@ -448,7 +453,7 @@ func joinedInputText(messages []InputMessage) string {
 }
 
 func joinedOutputText(items []OutputItem) string {
-	parts := make([]string, 0, len(items))
+	var parts []string
 	for _, item := range items {
 		text := strings.TrimSpace(item.Text)
 		if text == "" {

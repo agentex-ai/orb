@@ -335,7 +335,7 @@ func (a *OpenAIAdapter) GenerateStream(ctx context.Context, request Request, emi
 }
 
 func toRuntimeOutputFromOpenAI(items []openAIOutputItem) []OutputItem {
-	output := make([]OutputItem, 0)
+	var output []OutputItem
 	for _, item := range items {
 		if item.Type == "output_text" && strings.TrimSpace(item.Text) != "" {
 			output = append(output, OutputItem{

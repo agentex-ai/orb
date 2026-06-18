@@ -77,7 +77,7 @@ func (r *Registry) Models(ctx context.Context) []Model {
 		return nil
 	}
 
-	models := make([]Model, 0)
+	var models []Model
 	seen := make(map[string]bool)
 	for _, adapter := range r.adapters {
 		for _, model := range adapter.Models(ctx) {

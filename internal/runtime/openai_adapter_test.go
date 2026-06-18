@@ -214,7 +214,7 @@ func TestOpenAIAdapterGenerateStream(t *testing.T) {
 		t.Fatalf("expected adapter config success, got %v", err)
 	}
 
-	events := make([]StreamEvent, 0)
+	var events []StreamEvent
 	err = adapter.GenerateStream(context.Background(), Request{
 		Model:  "orb/openai/gpt-5-mini",
 		Stream: true,
